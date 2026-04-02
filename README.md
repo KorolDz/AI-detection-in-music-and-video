@@ -1,70 +1,100 @@
-# AI-detection-in-music-and-video
+# AI Detection in Music and Video
 
-Проект посвящен обнаружению фейков и цифровых манипуляций в аудио- и видеоконтенте, созданных или измененных с применением технологий искусственного интеллекта. Цель работы - разработать прикладную систему, повышающую доверие к цифровым источникам данных и помогающую выявлять подделки в медиафайлах.
+Cybersecurity-oriented project for validating media integrity and detecting suspicious files.
+This stage implements a production-ready metadata verification module for media files.
 
-## Цель проекта
+## Current Scope
 
-Разработать систему, способную определять степень достоверности аудио- и видеоконтента для выявления фейков, подделок и цифровых манипуляций. Решение должно быть пригодно для интеграции в медиа-платформы и поддерживать полуавтоматический или автоматический режим анализа.
+- Supported audio: `wav`, `mp3`
+- Supported video: `mp4`, `avi`, `mov`
+- Security checks:
+  - extension whitelist
+  - binary signature (magic bytes)
+  - extension/signature mismatch detection
+  - MIME consistency checks
+  - file hash generation (`sha256`, `md5`)
+  - timestamp anomaly checks
+  - format-specific metadata validation
 
-## Задачи
+## Project Structure
 
-- Реализовать загрузку и предварительную обработку медиафайлов.
-- Построить алгоритмы выделения признаков, характерных для подделки аудио и видео.
-- Выполнить классификацию контента на оригинальный и модифицированный.
-- Формировать отчет с оценкой достоверности и описанием выявленных несоответствий.
-- Организовать хранение результатов анализа для проверенных файлов.
+```text
+AI-detection-in-music-and-video/
+|-- pyproject.toml
+|-- project.txt
+|-- README.md
+|-- datasets/
+|   |-- README.md
+|   |-- test_media/
+|   |   |-- audio/
+|   |   `-- video/
+|   `-- external/
+|       |-- asvspoof2021/
+|       |-- faceforensicspp/
+|       `-- fakeavceleb/
+|-- scripts/
+|   |-- generate_test_media_fixtures.py
+|   `-- run_metadata_scan.ps1
+|-- reports/
+|   `-- .gitkeep
+|-- src/
+|   |-- media_security/
+|   |   |-- __init__.py
+|   |   |-- cli.py
+|   |   |-- constants.py
+|   |   |-- models.py
+|   |   |-- scanner.py
+|   |   |-- signatures.py
+|   |   `-- extractors/
+|   |       |-- __init__.py
+|   |       |-- common.py
+|   |       |-- audio.py
+|   |       `-- video.py
+|   `-- video_detection/
+|       `-- mesonet_simple.py
+`-- tests/
+    |-- test_scanner.py
+    `-- test_signatures.py
+```
 
-## Основные функции
+## Quick Start
 
-- Анализ аудиофайлов на наличие следов синтетической генерации, редактирования голоса, шумов и тембра.
-- Анализ видео на наличие подмены лиц, измененных движений губ и визуальных артефактов.
-- Расчет вероятности фальсификации и выдача итогового вердикта.
-- Визуализация результатов проверки в виде понятного отчета.
-- Ведение базы ранее проверенных медиафайлов и результатов их анализа.
+```bash
+python -m pip install -e .[dev]
+pytest
+```
 
-## Поддерживаемые форматы
+Generate local audio/video fixtures for scanner tests:
 
-- Аудио: `wav`, `mp3`
-- Видео: `mp4`, `avi`, `mov`
+```bash
+python scripts/generate_test_media_fixtures.py
+```
 
-## Архитектура решения
+Run scan for one file:
 
-Система проектируется как модульное решение, состоящее из следующих подсистем:
+```bash
+python -m media_security.cli path/to/file.mp4 --json-out reports/file_report.json
+```
 
-- Модуль загрузки и предобработки медиафайлов.
-- Модуль анализа аудио с выделением признаков искусственной генерации или редактирования.
-- Модуль анализа видео для обнаружения deepfake-артефактов и цифровых манипуляций.
-- Модуль классификации с оценкой вероятности фальсификации.
-- Модуль визуализации и формирования отчета по результатам проверки.
-- Пользовательский интерфейс для загрузки файлов и просмотра результатов.
-- Подсистема хранения данных и истории проведенных проверок.
+Run recursive directory scan:
 
-## Данные и обучение
+```bash
+python -m media_security.cli path/to/dataset --recursive --json-out reports/full_report.json
+```
 
-Для обучения и тестирования моделей предполагается использовать открытые датасеты, применяемые в задачах anti-spoofing и deepfake detection:
+PowerShell helper:
 
-- `ASVspoof` - для задач анализа подделок в аудио.
-- `DFDC` - для задач обнаружения deepfake-видео.
-- `Celeb-DF` - для оценки качества и устойчивости моделей детекции видеофальсификаций.
+```powershell
+./scripts/run_metadata_scan.ps1 -Target .\path\to\dataset -Recursive
+```
 
-Допускается использование готовых библиотек и моделей при условии их корректной интеграции и обоснованного выбора.
+## CLI Exit Codes
 
-## Требования к системе
+- `0` - all files passed (or warning-only mode accepted)
+- `1` - at least one file failed validation (or warnings when `--fail-on-warning` is set)
 
-- Модульная архитектура с разделением этапов обработки: загрузка, анализ, классификация, визуализация.
-- Поддержка популярных форматов аудио и видео.
-- Интерфейс уровня веб или десктоп для удобной загрузки файлов и просмотра результатов.
-- Целевая точность классификации не ниже `85%` на тестовой выборке.
-- Выполнение вычислений локально или на серверной части без передачи медиафайлов сторонним сервисам.
+## Next Steps
 
-## Структура репозитория
-
-Текущая структура проекта включает основные материалы и заготовки модулей:
-
-- `project.txt` - текст технического задания проекта.
-- `README.md` - основное описание проекта.
-- `src/video_detection/mesonet_simple.py` - текущая заготовка модуля для видеоанализа.
-
-## Ожидаемый результат
-
-В результате работы должен быть получен работоспособный прототип системы для определения фактов подделки аудио- и видеоконтента, а также подготовлен отчет с описанием архитектуры, методов детектирования, достигнутой точности и ограничений подхода. Отдельным итогом проекта должен стать интерактивный интерфейс для демонстрации работы системы.
+- Add EXIF and container-deep metadata checks
+- Add chain-of-custody storage for scan evidence
+- Integrate metadata verdict into audio/video deepfake classifiers

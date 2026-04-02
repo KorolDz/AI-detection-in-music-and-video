@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+reports/*.json
+datasets/external/asvspoof2021/*
+datasets/external/faceforensicspp/*
+datasets/external/fakeavceleb/*
+!datasets/external/asvspoof2021/.gitkeep
+!datasets/external/faceforensicspp/.gitkeep
+!datasets/external/fakeavceleb/.gitkeep
