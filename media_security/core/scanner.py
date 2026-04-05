@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
 
-from media_security.constants import (
+from media_security.core.analysis import refresh_report_assessment
+from media_security.core.constants import (
     LARGE_FILE_WARNING_BYTES,
     MAX_SIGNATURE_BYTES,
     MIME_BY_EXTENSION,
@@ -19,7 +21,7 @@ from media_security.extractors import (
     guess_mime_type,
     read_header,
 )
-from media_security.models import FileMetadata, Finding, ScanReport, Severity
+from media_security.core.models import FileMetadata, Finding, ScanReport, Severity
 from media_security.signatures import detect_format_from_signature, is_signature_compatible
 
 
@@ -29,20 +31,20 @@ class MediaSecurityScanner:
         if path.is_file():
             return [self.scan_file(path)]
         if not path.is_dir():
-            return [
-                ScanReport(
-                    file=str(path),
-                    supported=False,
-                    verdict="fail",
-                    findings=[
-                        Finding(
-                            code="PATH_NOT_FOUND",
-                            severity=Severity.HIGH,
-                            message="Target file or directory does not exist.",
-                        )
-                    ],
-                )
-            ]
+            report = ScanReport(
+                file=str(path),
+                supported=False,
+                verdict="fail",
+                findings=[
+                    Finding(
+                        code="PATH_NOT_FOUND",
+                        severity=Severity.HIGH,
+                        message="Target file or directory does not exist.",
+                    )
+                ],
+            )
+            refresh_report_assessment(report)
+            return [report]
 
         files = self._iter_files(path, recursive=recursive)
         return [self.scan_file(file_path) for file_path in files]
@@ -50,7 +52,7 @@ class MediaSecurityScanner:
     def scan_file(self, file_path: str | Path) -> ScanReport:
         path = Path(file_path)
         if not path.exists() or not path.is_file():
-            return ScanReport(
+            report = ScanReport(
                 file=str(path),
                 supported=False,
                 verdict="fail",
@@ -62,11 +64,32 @@ class MediaSecurityScanner:
                     )
                 ],
             )
+            refresh_report_assessment(report)
+            return report
 
         extension = path.suffix.lower().strip(".")
         supported = extension in SUPPORTED_EXTENSIONS
         media_type = _media_type_for_extension(extension)
         findings: list[Finding] = []
+
+        if path.is_symlink():
+            findings.append(
+                Finding(
+                    code="SYMLINK_INPUT",
+                    severity=Severity.WARNING,
+                    message="Symbolic link input detected. Validate source path provenance.",
+                )
+            )
+
+        if _has_double_supported_extension(path):
+            findings.append(
+                Finding(
+                    code="DOUBLE_EXTENSION",
+                    severity=Severity.WARNING,
+                    message="Filename contains multiple media extensions.",
+                    details={"suffixes": [item.strip(".") for item in path.suffixes]},
+                )
+            )
 
         if not supported:
             findings.append(
@@ -132,21 +155,25 @@ class MediaSecurityScanner:
             )
 
         timestamps = extract_file_timestamps(path)
-        if timestamps["created_at"] > timestamps["modified_at"]:
-            findings.append(
-                Finding(
-                    code="TIMESTAMP_ANOMALY",
-                    severity=Severity.WARNING,
-                    message="Creation timestamp is newer than modification timestamp.",
-                    details=timestamps,
-                )
-            )
+        findings.extend(_timestamp_findings(timestamps))
 
         technical_metadata: dict[str, object] = {}
         extractor_format = detected_format or extension
         technical_metadata, extraction_finding = self._extract_technical_metadata(path, extractor_format)
         if extraction_finding:
             findings.append(extraction_finding)
+        advanced_tools_finding = _advanced_metadata_tools_finding(extractor_format, technical_metadata)
+        if advanced_tools_finding:
+            findings.append(advanced_tools_finding)
+
+        findings.extend(
+            _container_consistency_findings(
+                file_format=extractor_format,
+                header=header,
+                file_size=file_size,
+                technical=technical_metadata,
+            )
+        )
 
         hashes = compute_hashes(path)
         metadata = FileMetadata(
@@ -162,14 +189,15 @@ class MediaSecurityScanner:
             signature=signature_result.details,
             technical=technical_metadata,
         )
-        verdict = _choose_verdict(findings)
-        return ScanReport(
+        report = ScanReport(
             file=str(path),
             supported=supported,
-            verdict=verdict,
+            verdict="pass",
             findings=findings,
             metadata=metadata,
         )
+        refresh_report_assessment(report)
+        return report
 
     def _extract_technical_metadata(
         self, path: Path, file_format: str
@@ -212,12 +240,100 @@ def _media_type_for_extension(extension: str) -> str | None:
     return None
 
 
-def _choose_verdict(findings: list[Finding]) -> str:
-    if any(finding.severity == Severity.HIGH for finding in findings):
-        return "fail"
-    if any(finding.severity == Severity.WARNING for finding in findings):
-        return "warning"
-    return "pass"
+def _has_double_supported_extension(path: Path) -> bool:
+    suffixes = [suffix.lower().strip(".") for suffix in path.suffixes if suffix]
+    if len(suffixes) < 2:
+        return False
+    return any(item in SUPPORTED_EXTENSIONS for item in suffixes[:-1]) and suffixes[-1] in SUPPORTED_EXTENSIONS
+
+
+def _timestamp_findings(timestamps: dict[str, str]) -> list[Finding]:
+    findings: list[Finding] = []
+    created_at = _parse_iso_timestamp(timestamps.get("created_at"))
+    modified_at = _parse_iso_timestamp(timestamps.get("modified_at"))
+
+    if created_at and modified_at and created_at > modified_at:
+        findings.append(
+            Finding(
+                code="TIMESTAMP_ANOMALY",
+                severity=Severity.INFO,
+                message="Creation timestamp is newer than modification timestamp (common after file copy).",
+                details=timestamps,
+            )
+        )
+
+    if modified_at and modified_at > datetime.now(tz=UTC):
+        findings.append(
+            Finding(
+                code="FUTURE_MODIFIED_TIME",
+                severity=Severity.WARNING,
+                message="Modification timestamp is in the future.",
+                details=timestamps,
+            )
+        )
+    return findings
+
+
+def _container_consistency_findings(
+    file_format: str, header: bytes, file_size: int, technical: dict[str, object]
+) -> list[Finding]:
+    findings: list[Finding] = []
+
+    if file_format in {"wav", "avi"} and len(header) >= 8 and header[0:4] == b"RIFF":
+        declared_size = int.from_bytes(header[4:8], byteorder="little") + 8
+        if declared_size > file_size + 16:
+            findings.append(
+                Finding(
+                    code="RIFF_DECLARED_SIZE_TOO_LARGE",
+                    severity=Severity.HIGH,
+                    message="RIFF declared size exceeds physical file size.",
+                    details={"declared_size_bytes": declared_size, "actual_size_bytes": file_size},
+                )
+            )
+        elif abs(declared_size - file_size) > 16 * 1024:
+            findings.append(
+                Finding(
+                    code="RIFF_SIZE_MISMATCH",
+                    severity=Severity.WARNING,
+                    message="RIFF declared size differs from file size significantly.",
+                    details={"declared_size_bytes": declared_size, "actual_size_bytes": file_size},
+                )
+            )
+
+    if file_format in {"mp4", "mov"} and len(header) >= 8 and header[4:8] == b"ftyp":
+        first_box_size = int.from_bytes(header[0:4], byteorder="big")
+        if first_box_size < 8:
+            findings.append(
+                Finding(
+                    code="INVALID_FTYP_BOX_SIZE",
+                    severity=Severity.HIGH,
+                    message="Invalid ISO-BMFF ftyp box size.",
+                    details={"ftyp_box_size": first_box_size},
+                )
+            )
+        elif first_box_size > file_size:
+            findings.append(
+                Finding(
+                    code="FTYP_BOX_EXCEEDS_FILE",
+                    severity=Severity.HIGH,
+                    message="ISO-BMFF ftyp box size exceeds file size.",
+                    details={"ftyp_box_size": first_box_size, "actual_size_bytes": file_size},
+                )
+            )
+
+    if file_format == "mp3":
+        id3_size = technical.get("id3v2_size_bytes")
+        if isinstance(id3_size, int) and id3_size > file_size:
+            findings.append(
+                Finding(
+                    code="ID3_SIZE_EXCEEDS_FILE",
+                    severity=Severity.HIGH,
+                    message="ID3 metadata size exceeds file size.",
+                    details={"id3_size_bytes": id3_size, "actual_size_bytes": file_size},
+                )
+            )
+
+    return findings
 
 
 def _validate_technical_metadata(file_format: str, technical: dict[str, object]) -> Finding | None:
@@ -265,3 +381,47 @@ def _validate_technical_metadata(file_format: str, technical: dict[str, object])
             )
 
     return None
+
+
+def _advanced_metadata_tools_finding(file_format: str, technical: dict[str, object]) -> Finding | None:
+    if file_format not in {"mp4", "mov", "avi", "wav", "mp3"}:
+        return None
+
+    ffprobe = technical.get("ffprobe")
+    exiftool = technical.get("exiftool")
+    ffprobe_available = bool(ffprobe.get("available")) if isinstance(ffprobe, dict) else False
+    exiftool_available = bool(exiftool.get("available")) if isinstance(exiftool, dict) else False
+    if ffprobe_available or exiftool_available:
+        return None
+
+    if file_format in {"wav", "mp3"}:
+        return Finding(
+            code="ADVANCED_AUDIO_METADATA_UNAVAILABLE",
+            severity=Severity.INFO,
+            message=(
+                "Install ffprobe or exiftool to extract extended audio metadata "
+                "(device model, software, recording timestamps)."
+            ),
+        )
+
+    return Finding(
+        code="ADVANCED_VIDEO_METADATA_UNAVAILABLE",
+        severity=Severity.INFO,
+        message=(
+            "Install ffprobe or exiftool to extract extended video metadata "
+            "(device model, software, location tags)."
+        ),
+    )
+
+
+def _parse_iso_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        normalized = value.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed
+    except ValueError:
+        return None

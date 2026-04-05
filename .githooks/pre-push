@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+CHECK_SCRIPT="$ROOT_DIR/scripts/check_secrets.ps1"
+
+if [ ! -f "$CHECK_SCRIPT" ]; then
+  echo "Secrets check script not found: $CHECK_SCRIPT" >&2
+  exit 1
+fi
+
+if command -v pwsh >/dev/null 2>&1; then
+  pwsh -NoProfile -ExecutionPolicy Bypass -File "$CHECK_SCRIPT" -Strict
+elif command -v powershell >/dev/null 2>&1; then
+  powershell -NoProfile -ExecutionPolicy Bypass -File "$CHECK_SCRIPT" -Strict
+else
+  echo "PowerShell is required for secrets check. Install PowerShell and retry." >&2
+  exit 1
+fi

@@ -1,57 +1,33 @@
-# Datasets and Test Media
+# Датасеты и локальные файлы
 
-## Local Test Fixtures
+Каталог `datasets` используется как единая рабочая папка для проверки медиафайлов.
 
-This repository includes a lightweight fixture structure for metadata security checks:
+## Структура
 
 ```text
 datasets/
-|-- test_media/
-|   |-- audio/
-|   |   |-- real/
-|   |   `-- suspicious/
-|   `-- video/
-|       |-- real/
-|       `-- suspicious/
-`-- external/
-    |-- asvspoof2021/
-    |-- faceforensicspp/
-    `-- fakeavceleb/
+|-- audio/
+|-- video/
+|-- unsupported/
+`-- README.md
 ```
 
-Generate local fixture files:
+- `audio/` — аудиофайлы `wav` и `mp3`.
+- `video/` — видеофайлы `mp4`, `avi`, `mov`.
+- `unsupported/` — файлы, которые не соответствуют формату из ТЗ и нужны для негативных проверок.
+
+## Генерация тестовых файлов
+
+Базовые локальные примеры:
 
 ```bash
 python scripts/generate_test_media_fixtures.py
 ```
 
-After generation:
-- `test_media/audio/real` contains valid `wav` and `mp3` samples.
-- `test_media/video/real` contains valid `mp4`, `mov`, and `avi` container samples.
-- `test_media/*/suspicious` contains mismatch and unsupported files for negative tests.
+Примеры аудиофайлов с расширенными метаданными:
 
-## Recommended Public Datasets
+```bash
+python scripts/generate_metadata_examples.py
+```
 
-Checked on **2026-04-02**.
-
-1. **FakeAVCeleb** (audio + video deepfake dataset, multimodal)
-   - Main repo and access instructions: https://github.com/DASH-Lab/FakeAVCeleb
-   - Access is provided via request form (linked in repo README).
-   - Best fit when you need both audio and video in one dataset.
-
-2. **ASVspoof 2021** (speech anti-spoofing / deepfake audio)
-   - Official page: https://www.asvspoof.org/index2021.html
-   - Data links on Zenodo are published on the official page (LA / PA / DF subsets).
-   - Use for audio-focused validation and spoofing robustness checks.
-
-3. **FaceForensics++** (video face manipulation detection)
-   - Official repo and access details: https://github.com/ondyari/FaceForensics
-   - Access is request-based via form (linked in repo README).
-   - Strong option for video forgery benchmarks.
-
-## Where to Place Downloaded Data
-
-Suggested mapping:
-- ASVspoof 2021 -> `datasets/external/asvspoof2021/`
-- FaceForensics++ -> `datasets/external/faceforensicspp/`
-- FakeAVCeleb -> `datasets/external/fakeavceleb/`
+После генерации файлы появляются сразу в `datasets/audio`, `datasets/video` и `datasets/unsupported`.

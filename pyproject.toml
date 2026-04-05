@@ -9,7 +9,7 @@ description = "Cybersecurity-focused metadata and integrity checks for media fil
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "AI Detection Team" }]
-dependencies = []
+dependencies = ["psycopg[binary]>=3.2.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
@@ -17,12 +17,12 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 media-security-scan = "media_security.cli:main"
 
-[tool.setuptools]
-package-dir = { "" = "src" }
-
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["media_security*"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["."]
 testpaths = ["tests"]
+cache_dir = ".cache/pytest/cache"
+addopts = "--basetemp=.cache/pytest/tmp"

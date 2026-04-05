@@ -1,7 +1,7 @@
 from pathlib import Path
 import wave
 
-from media_security.scanner import MediaSecurityScanner
+from media_security.core.scanner import MediaSecurityScanner
 
 
 def test_scan_valid_wav_file(tmp_path: Path) -> None:
@@ -11,6 +11,8 @@ def test_scan_valid_wav_file(tmp_path: Path) -> None:
     report = MediaSecurityScanner().scan_file(sample)
     assert report.supported is True
     assert report.verdict == "pass"
+    assert report.trust_score == 100
+    assert report.risk_level == "low"
     assert report.metadata is not None
     assert report.metadata.detected_format == "wav"
     assert report.metadata.technical["sample_rate_hz"] == 8000

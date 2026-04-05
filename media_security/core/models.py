@@ -63,6 +63,9 @@ class ScanReport:
     supported: bool
     verdict: str
     findings: list[Finding]
+    trust_score: int = 100
+    risk_level: str = "low"
+    scan_id: int | None = None
     metadata: FileMetadata | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -70,6 +73,9 @@ class ScanReport:
             "file": self.file,
             "supported": self.supported,
             "verdict": self.verdict,
+            "trust_score": self.trust_score,
+            "risk_level": self.risk_level,
+            "scan_id": self.scan_id,
             "findings": [finding.to_dict() for finding in self.findings],
             "metadata": self.metadata.to_dict() if self.metadata else None,
         }

@@ -1,100 +1,170 @@
-# AI Detection in Music and Video
+# Обнаружение фейков и цифровых манипуляций в медиафайлах
 
-Cybersecurity-oriented project for validating media integrity and detecting suspicious files.
-This stage implements a production-ready metadata verification module for media files.
+Проект посвящен созданию прикладной системы, которая должна определять степень достоверности аудио- и видеоконтента и выявлять фейки, подделки и цифровые манипуляции, выполненные с применением технологий искусственного интеллекта.
 
-## Current Scope
+## Тема и цель проекта
 
-- Supported audio: `wav`, `mp3`
-- Supported video: `mp4`, `avi`, `mov`
-- Security checks:
-  - extension whitelist
-  - binary signature (magic bytes)
-  - extension/signature mismatch detection
-  - MIME consistency checks
-  - file hash generation (`sha256`, `md5`)
-  - timestamp anomaly checks
-  - format-specific metadata validation
+Тема проекта:
 
-## Project Structure
+- обнаружение фейков и цифровых манипуляций в медиафайлах.
 
-```text
-AI-detection-in-music-and-video/
-|-- pyproject.toml
-|-- project.txt
-|-- README.md
-|-- datasets/
-|   |-- README.md
-|   |-- test_media/
-|   |   |-- audio/
-|   |   `-- video/
-|   `-- external/
-|       |-- asvspoof2021/
-|       |-- faceforensicspp/
-|       `-- fakeavceleb/
-|-- scripts/
-|   |-- generate_test_media_fixtures.py
-|   `-- run_metadata_scan.ps1
-|-- reports/
-|   `-- .gitkeep
-|-- src/
-|   |-- media_security/
-|   |   |-- __init__.py
-|   |   |-- cli.py
-|   |   |-- constants.py
-|   |   |-- models.py
-|   |   |-- scanner.py
-|   |   |-- signatures.py
-|   |   `-- extractors/
-|   |       |-- __init__.py
-|   |       |-- common.py
-|   |       |-- audio.py
-|   |       `-- video.py
-|   `-- video_detection/
-|       `-- mesonet_simple.py
-`-- tests/
-    |-- test_scanner.py
-    `-- test_signatures.py
-```
+Цель проекта:
 
-## Quick Start
+- разработать систему, способную анализировать аудио и видео и определять, является ли контент оригинальным или модифицированным;
+- повысить информационную безопасность и доверие к цифровым источникам данных;
+- обеспечить возможность интеграции решения в медиа-платформы;
+- поддержать полуавтоматический и автоматический режим анализа.
+
+## Описание задачи по ТЗ
+
+По ТЗ система должна уметь классифицировать входные данные как оригинальные либо модифицированные.
+
+Для аудио в проекте требуется:
+
+- распознавать следы обработки голоса;
+- анализировать шумы и тембр;
+- выявлять признаки генерации или редактирования с помощью ИИ.
+
+Для видео в проекте требуется:
+
+- обнаруживать подмену лиц;
+- выявлять измененные движения губ;
+- искать визуальные артефакты, характерные для цифровых манипуляций.
+
+В проекте допускается использование готовых библиотек и моделей, если их выбор обоснован и они корректно интегрированы в систему.
+
+## Основные функции системы
+
+Согласно ТЗ, система должна включать:
+
+- загрузку и предварительную обработку входных медиафайлов;
+- анализ и выделение признаков подделки;
+- классификацию результата с указанием вероятности фальсификации;
+- визуализацию отчета о достоверности файла;
+- ведение базы проверенных медиафайлов с результатами анализа.
+
+## Требования к реализации
+
+В ТЗ зафиксированы следующие требования:
+
+- поддержка популярных форматов аудио: `wav`, `mp3`;
+- поддержка популярных форматов видео: `mp4`, `avi`, `mov`;
+- точность классификации не ниже 85% на тестовой выборке;
+- модульная архитектура с разделением этапов: загрузка, анализ, классификация, визуализация;
+- наличие интерфейса: веб или десктоп;
+- использование открытых датасетов для обучения моделей;
+- выполнение вычислений локально или на серверной стороне без передачи файлов сторонним сервисам.
+
+## Ожидаемый результат проекта
+
+По ТЗ результатом должен быть:
+
+- работоспособный прототип системы для определения подделки аудио- и видеоконтента;
+- отчет по архитектуре, методам детектирования, точности и ограничениям;
+- интерактивный интерфейс для демонстрации работы системы.
+
+## Распределение ролей в команде
+
+Репозиторий общий, и к нему имеют доступ оба участника команды.
+
+Зона ответственности специалиста по кибербезопасности:
+
+- безопасная обработка входных файлов;
+- проверка сигнатур, структуры контейнера и метаданных;
+- оценка риска и формирование технического отчета;
+- хранение истории проверок в PostgreSQL;
+- контроль того, чтобы в репозиторий не попадали секреты.
+
+Зона ответственности участника по направлению ИИ:
+
+- подготовка и обучение моделей;
+- инференс моделей для аудио и видео;
+- оценка точности классификации;
+- интеграция model score в общий итоговый вывод системы.
+
+## Что уже реализовано в репозитории
+
+На текущий момент в репозитории уже есть:
+
+- CLI для проверки медиафайлов;
+- поддержка форматов `wav`, `mp3`, `mp4`, `avi`, `mov`;
+- проверка расширения, сигнатуры, MIME-типа и базовой структуры контейнера;
+- извлечение и анализ метаданных;
+- компактный JSON-отчет без дублирования одинаковых полей;
+- полуавтоматический и автоматический запуск через PowerShell-скрипты;
+- хранение истории проверок в PostgreSQL;
+- проверка репозитория на типовые утечки секретов перед `git push`.
+
+## Структура данных
+
+Рабочие медиафайлы хранятся в [datasets]:
+
+- [audio]
+- [video]
+- [unsupported]
+
+Описание структуры датасетов находится в [datasets/README.md].
+
+## Быстрый запуск
+
+Установка:
 
 ```bash
 python -m pip install -e .[dev]
-pytest
 ```
 
-Generate local audio/video fixtures for scanner tests:
+Проверка одного файла:
 
 ```bash
-python scripts/generate_test_media_fixtures.py
+python -m media_security.cli path/to/file.mp4 --json-out reports/file_report.json --no-history
 ```
 
-Run scan for one file:
+Проверка всей папки:
 
 ```bash
-python -m media_security.cli path/to/file.mp4 --json-out reports/file_report.json
+python -m media_security.cli path/to/dataset --recursive --json-out reports/full_report.json --no-history
 ```
 
-Run recursive directory scan:
-
-```bash
-python -m media_security.cli path/to/dataset --recursive --json-out reports/full_report.json
-```
-
-PowerShell helper:
+PowerShell-скрипты:
 
 ```powershell
-./scripts/run_metadata_scan.ps1 -Target .\path\to\dataset -Recursive
+./scripts/run_metadata_scan.ps1 -Target .\datasets -Recursive -NoHistory
+./scripts/auto_scan_inbox.ps1 -Inbox .\datasets
 ```
 
-## CLI Exit Codes
+## Внешние инструменты
 
-- `0` - all files passed (or warning-only mode accepted)
-- `1` - at least one file failed validation (or warnings when `--fail-on-warning` is set)
+Для расширенного извлечения метаданных используются `ffprobe` и `exiftool`.
 
-## Next Steps
+Проверка доступности инструментов:
 
-- Add EXIF and container-deep metadata checks
-- Add chain-of-custody storage for scan evidence
-- Integrate metadata verdict into audio/video deepfake classifiers
+```powershell
+./scripts/check_external_tools.ps1
+```
+
+Полезные флаги CLI:
+
+- `--no-tool-setup`
+- `--no-auto-install-tools`
+- `--require-external-tools`
+
+## PostgreSQL
+
+История проверок может сохраняться в PostgreSQL. Параметры подключения должны задаваться локально через переменные окружения или через параметры запуска.
+
+Пример запуска базы:
+
+```bash
+docker compose -f infra/docker-compose.postgres.yml up -d
+```
+
+## Безопасность репозитория
+
+Перед `git push` можно запускать:
+
+```powershell
+./scripts/check_secrets.ps1 -Strict
+./scripts/install_git_hooks.ps1
+```
+
+В репозитории не должны храниться реальные пароли, токены, API-ключи, приватные сертификаты и другие чувствительные данные.

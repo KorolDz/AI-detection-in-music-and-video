@@ -1,10 +1,7 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$Target,
-    [switch]$Recursive,
-    [string]$JsonOut = "reports/metadata_scan_report.json",
+    [string]$Inbox = "datasets",
+    [string]$ReportsDir = "reports/auto",
     [string]$PostgresDsn = "postgresql://postgres:postgres@localhost:5432/media_security",
-    [switch]$NoHistory,
     [switch]$NoToolSetup,
     [switch]$NoAutoInstallTools,
     [switch]$RequireExternalTools
@@ -30,15 +27,8 @@ if (-not $NoToolSetup) {
     }
 }
 
-$arguments = @("-m", "media_security.cli", $Target, "--json-out", $JsonOut, "--no-tool-setup")
-if ($Recursive) {
-    $arguments += "--recursive"
-}
-if ($NoHistory) {
-    $arguments += "--no-history"
-}
-else {
-    $arguments += @("--postgres-dsn", $PostgresDsn)
-}
+New-Item -ItemType Directory -Force -Path $ReportsDir | Out-Null
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$jsonOut = Join-Path $ReportsDir "scan_$timestamp.json"
 
-python $arguments
+python -m media_security.cli $Inbox --recursive --json-out $jsonOut --postgres-dsn $PostgresDsn --no-tool-setup

@@ -7,37 +7,36 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DATASET_DIR = ROOT / "datasets" / "test_media"
+DATASET_DIR = ROOT / "datasets"
 
 
 def main() -> None:
     _ensure_layout()
 
     _create_wav(
-        DATASET_DIR / "audio" / "real" / "tone_440hz.wav",
+        DATASET_DIR / "audio" / "tone_440hz.wav",
         duration_sec=1.0,
         sample_rate=16_000,
         frequency_hz=440.0,
     )
-    _create_minimal_mp3(DATASET_DIR / "audio" / "real" / "frame_header.mp3")
+    _create_minimal_mp3(DATASET_DIR / "audio" / "frame_header.mp3")
 
-    _create_minimal_mp4(DATASET_DIR / "video" / "real" / "container.mp4")
-    _create_minimal_mov(DATASET_DIR / "video" / "real" / "container.mov")
-    _create_minimal_avi(DATASET_DIR / "video" / "real" / "container.avi")
+    _create_minimal_mp4(DATASET_DIR / "video" / "container.mp4")
+    _create_minimal_mov(DATASET_DIR / "video" / "container.mov")
+    _create_minimal_avi(DATASET_DIR / "video" / "container.avi")
 
-    _create_mp4_disguised_as_wav(DATASET_DIR / "audio" / "suspicious" / "mp4_as_wav.wav")
-    _create_wav_disguised_as_mp4(DATASET_DIR / "video" / "suspicious" / "wav_as_mp4.mp4")
-    _create_text_file(DATASET_DIR / "video" / "suspicious" / "not_media.txt")
+    _create_mp4_disguised_as_wav(DATASET_DIR / "audio" / "mp4_as_wav.wav")
+    _create_wav_disguised_as_mp4(DATASET_DIR / "video" / "wav_as_mp4.mp4")
+    _create_text_file(DATASET_DIR / "unsupported" / "not_media.txt")
 
     print(f"Fixtures generated in: {DATASET_DIR}")
 
 
 def _ensure_layout() -> None:
     for path in (
-        DATASET_DIR / "audio" / "real",
-        DATASET_DIR / "audio" / "suspicious",
-        DATASET_DIR / "video" / "real",
-        DATASET_DIR / "video" / "suspicious",
+        DATASET_DIR / "audio",
+        DATASET_DIR / "video",
+        DATASET_DIR / "unsupported",
     ):
         path.mkdir(parents=True, exist_ok=True)
 
