@@ -33,9 +33,6 @@ $patterns = @(
 )
 
 $allowlistRegex = @(
-    "postgresql://postgres:postgres@localhost:5432/media_security",
-    "postgresql://user:pass@host:5432/dbname",
-    "POSTGRES_PASSWORD:\s*postgres",
     "user,\s*_password\s*=\s*user_info\.split\(",
     "example",
     "\.example"

@@ -12,6 +12,7 @@ from media_security.core.constants import (
     SUPPORTED_EXTENSIONS,
     SUPPORTED_MEDIA_EXTENSIONS,
 )
+from media_security.core.metadata_forensics import analyze_metadata_forensics
 from media_security.extractors import (
     compute_hashes,
     extract_file_timestamps,
@@ -165,6 +166,7 @@ class MediaSecurityScanner:
         advanced_tools_finding = _advanced_metadata_tools_finding(extractor_format, technical_metadata)
         if advanced_tools_finding:
             findings.append(advanced_tools_finding)
+        findings.extend(analyze_metadata_forensics(extractor_format, technical_metadata))
 
         findings.extend(
             _container_consistency_findings(

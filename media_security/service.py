@@ -5,7 +5,7 @@ from typing import Protocol
 
 from media_security.core.models import ScanReport
 from media_security.core.scanner import MediaSecurityScanner
-from media_security.storage.postgres_history import PostgresScanHistoryStore
+from media_security.storage.sqlite_history import SQLiteScanHistoryStore
 
 
 class HistoryStore(Protocol):
@@ -23,8 +23,8 @@ class SecurityAnalysisService:
         self.history_store = history_store
 
     @classmethod
-    def with_postgres(cls, dsn: str) -> "SecurityAnalysisService":
-        return cls(history_store=PostgresScanHistoryStore(dsn))
+    def with_sqlite(cls, sqlite_path: str | Path | None = None) -> "SecurityAnalysisService":
+        return cls(history_store=SQLiteScanHistoryStore(sqlite_path))
 
     @classmethod
     def without_history(cls) -> "SecurityAnalysisService":

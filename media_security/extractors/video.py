@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
 from .common import read_header
+from media_security.external_tools import resolve_external_tool
 
 MAX_FTYP_BOX_BYTES = 4096
 MAX_META_BOX_BYTES = 512 * 1024
@@ -68,6 +68,11 @@ VIDEO_EXIFTOOL_TAG_KEYS = {
     "VideoFullRangeFlag",
     "ZoneIdentifier",
     "Warning",
+    "XMPToolkit",
+    "CreatorTool",
+    "HistorySoftwareAgent",
+    "MetadataDate",
+    "Comment",
 }
 
 VIDEO_STREAM_TAG_KEYS = {"creation_time", "language", "handler_name", "encoder"}
@@ -475,11 +480,12 @@ def _postprocess_udta_tags(tags: dict[str, str]) -> dict[str, str]:
 
 
 def _extract_ffprobe_summary(path: Path) -> dict[str, Any] | None:
-    if shutil.which("ffprobe") is None:
+    ffprobe_path = resolve_external_tool("ffprobe")
+    if ffprobe_path is None:
         return {"available": False}
 
     command = [
-        "ffprobe",
+        str(ffprobe_path),
         "-v",
         "quiet",
         "-print_format",
@@ -525,10 +531,11 @@ def _extract_ffprobe_summary(path: Path) -> dict[str, Any] | None:
 
 
 def _extract_exiftool_summary(path: Path) -> dict[str, Any] | None:
-    if shutil.which("exiftool") is None:
+    exiftool_path = resolve_external_tool("exiftool")
+    if exiftool_path is None:
         return {"available": False}
 
-    command = ["exiftool", "-j", str(path)]
+    command = [str(exiftool_path), "-j", str(path)]
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True)
         payload = json.loads(result.stdout)

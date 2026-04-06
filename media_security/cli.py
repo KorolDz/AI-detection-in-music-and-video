@@ -4,16 +4,14 @@ import argparse
 import copy
 import json
 import os
-import shutil
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
 from media_security.core.models import ScanReport, Severity
+from media_security.external_tools import missing_external_tools
 from media_security.service import SecurityAnalysisService
-
-
-DEFAULT_POSTGRES_DSN = "postgresql://postgres:postgres@localhost:5432/media_security"
+from media_security.storage.sqlite_config import resolve_sqlite_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,11 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Return non-zero exit code when warning findings exist.",
     )
     parser.add_argument(
-        "--postgres-dsn",
-        default=os.getenv("MEDIA_SECURITY_POSTGRES_DSN", DEFAULT_POSTGRES_DSN),
+        "--sqlite-path",
+        type=Path,
         help=(
-            "PostgreSQL DSN (default: MEDIA_SECURITY_POSTGRES_DSN env var "
-            "or local DSN postgresql://postgres:postgres@localhost:5432/media_security)."
+            "SQLite history database path. If omitted, CLI uses MEDIA_SECURITY_SQLITE_PATH "
+            "or a secure per-user local path."
         ),
     )
     parser.add_argument(
@@ -79,10 +77,11 @@ def main(argv: list[str] | None = None) -> int:
             no_auto_install=args.no_auto_install_tools,
             require_external=args.require_external_tools,
         )
+        sqlite_path = None if args.no_history else resolve_sqlite_path(args.sqlite_path)
         service = (
             SecurityAnalysisService.without_history()
             if args.no_history
-            else SecurityAnalysisService.with_postgres(args.postgres_dsn)
+            else SecurityAnalysisService.with_sqlite(sqlite_path)
         )
         reports = service.analyze_path(
             target=args.path,
@@ -99,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _print_reports(reports)
     if not args.no_history:
-        print(f"History DB: PostgreSQL ({_redact_dsn(args.postgres_dsn)})")
+        print(f"History DB: SQLite ({sqlite_path})")
 
     if args.json_out:
         _write_json_report(args.json_out, args.path, reports)
@@ -454,24 +453,15 @@ def _drop_empty_containers(value: object) -> object:
     return value
 
 
-def _redact_dsn(dsn: str) -> str:
-    if "@" not in dsn:
-        return dsn
-    credentials, host = dsn.rsplit("@", 1)
-    if "://" not in credentials:
-        return dsn
-    scheme, user_info = credentials.split("://", 1)
-    if ":" in user_info:
-        user, _password = user_info.split(":", 1)
-        return f"{scheme}://{user}:***@{host}"
-    return dsn
-
-
 def _setup_external_tools(skip_setup: bool, no_auto_install: bool, require_external: bool) -> None:
     if skip_setup:
         return
 
     tools = ("ffprobe", "exiftool")
+    missing = missing_external_tools(tools)
+    if not missing:
+        return
+
     tools_script = Path(__file__).resolve().parents[1] / "scripts" / "check_external_tools.ps1"
 
     if os.name == "nt" and tools_script.exists():
@@ -487,14 +477,14 @@ def _setup_external_tools(skip_setup: bool, no_auto_install: bool, require_exter
         if require_external:
             command.append("-Strict")
 
-        result = subprocess.run(command, check=False)
-        if require_external and result.returncode != 0:
+        subprocess.run(command, check=False)
+        missing = missing_external_tools(tools)
+        if require_external and missing:
             raise RuntimeError(
                 "External tools check failed. Install ffprobe/exiftool or run without --require-external-tools."
             )
         return
 
-    missing = [tool for tool in tools if shutil.which(tool) is None]
     if require_external and missing:
         raise RuntimeError(
             "Missing external tools: "

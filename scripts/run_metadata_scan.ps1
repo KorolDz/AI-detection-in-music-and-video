@@ -3,7 +3,7 @@ param(
     [string]$Target,
     [switch]$Recursive,
     [string]$JsonOut = "reports/metadata_scan_report.json",
-    [string]$PostgresDsn = "postgresql://postgres:postgres@localhost:5432/media_security",
+    [string]$SqlitePath,
     [switch]$NoHistory,
     [switch]$NoToolSetup,
     [switch]$NoAutoInstallTools,
@@ -37,8 +37,8 @@ if ($Recursive) {
 if ($NoHistory) {
     $arguments += "--no-history"
 }
-else {
-    $arguments += @("--postgres-dsn", $PostgresDsn)
+elseif ($SqlitePath) {
+    $arguments += @("--sqlite-path", $SqlitePath)
 }
 
 python $arguments

@@ -1,3 +1,3 @@
-from .postgres_history import PostgresScanHistoryStore
+from .sqlite_history import SQLiteScanHistoryStore
 
-__all__ = ["PostgresScanHistoryStore"]
+__all__ = ["SQLiteScanHistoryStore"]

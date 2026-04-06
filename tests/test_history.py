@@ -1,23 +1,14 @@
-import os
 from pathlib import Path
-
-import pytest
 
 from media_security.service import SecurityAnalysisService
 
 
-POSTGRES_DSN = os.getenv("TEST_MEDIA_SECURITY_POSTGRES_DSN")
-
-
-@pytest.mark.skipif(
-    not POSTGRES_DSN,
-    reason="Integration tests require TEST_MEDIA_SECURITY_POSTGRES_DSN.",
-)
 def test_history_detects_file_change(tmp_path: Path) -> None:
     media_file = tmp_path / "sample.mp3"
+    sqlite_path = tmp_path / "history.sqlite3"
     media_file.write_bytes(bytes.fromhex("FFFB9064") + b"\x00" * 512)
 
-    service = SecurityAnalysisService.with_postgres(POSTGRES_DSN or "")
+    service = SecurityAnalysisService.with_sqlite(sqlite_path)
     first_report = service.analyze_path(media_file)[0]
     assert first_report.scan_id is not None
 
@@ -31,15 +22,12 @@ def test_history_detects_file_change(tmp_path: Path) -> None:
     assert second_report.trust_score < first_report.trust_score
 
 
-@pytest.mark.skipif(
-    not POSTGRES_DSN,
-    reason="Integration tests require TEST_MEDIA_SECURITY_POSTGRES_DSN.",
-)
 def test_history_marks_known_hash_for_same_path(tmp_path: Path) -> None:
     media_file = tmp_path / "sample.mp3"
+    sqlite_path = tmp_path / "history.sqlite3"
     media_file.write_bytes(bytes.fromhex("FFFB9064") + b"\x00" * 256)
 
-    service = SecurityAnalysisService.with_postgres(POSTGRES_DSN or "")
+    service = SecurityAnalysisService.with_sqlite(sqlite_path)
     service.analyze_path(media_file)
     second_report = service.analyze_path(media_file)[0]
     codes = {finding.code for finding in second_report.findings}

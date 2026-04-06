@@ -1,6 +1,7 @@
 param(
     [switch]$Strict,
-    [switch]$InstallMissing
+    [switch]$InstallMissing,
+    [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot)
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +26,96 @@ function Test-Tool {
     )
 
     return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+function Resolve-ToolPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("ffprobe", "exiftool")]
+        [string]$Name
+    )
+
+    $toolEnvVars = @{
+        "ffprobe" = "MEDIA_SECURITY_FFPROBE_PATH"
+        "exiftool" = "MEDIA_SECURITY_EXIFTOOL_PATH"
+    }
+    $toolRelativePaths = @{
+        "ffprobe" = @(
+            "ffmpeg\\bin\\ffprobe.exe",
+            "ffprobe\\ffprobe.exe",
+            "ffprobe.exe"
+        )
+        "exiftool" = @(
+            "exiftool\\exiftool.exe",
+            "exiftool\\exiftool(-k).exe",
+            "exiftool.exe"
+        )
+    }
+
+    $explicitPath = [System.Environment]::GetEnvironmentVariable($toolEnvVars[$Name], "Process")
+    if ([string]::IsNullOrWhiteSpace($explicitPath)) {
+        $explicitPath = [System.Environment]::GetEnvironmentVariable($toolEnvVars[$Name], "User")
+    }
+    if ([string]::IsNullOrWhiteSpace($explicitPath)) {
+        $explicitPath = [System.Environment]::GetEnvironmentVariable($toolEnvVars[$Name], "Machine")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($explicitPath) -and (Test-Path -LiteralPath $explicitPath -PathType Leaf)) {
+        return @{
+            Found = $true
+            Path = (Resolve-Path -LiteralPath $explicitPath).Path
+            Source = "env"
+        }
+    }
+
+    $candidateRoots = New-Object System.Collections.Generic.List[string]
+    $sharedToolsDir = [System.Environment]::GetEnvironmentVariable("MEDIA_SECURITY_TOOLS_DIR", "Process")
+    if ([string]::IsNullOrWhiteSpace($sharedToolsDir)) {
+        $sharedToolsDir = [System.Environment]::GetEnvironmentVariable("MEDIA_SECURITY_TOOLS_DIR", "User")
+    }
+    if ([string]::IsNullOrWhiteSpace($sharedToolsDir)) {
+        $sharedToolsDir = [System.Environment]::GetEnvironmentVariable("MEDIA_SECURITY_TOOLS_DIR", "Machine")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($sharedToolsDir)) {
+        $candidateRoots.Add($sharedToolsDir)
+    }
+    $candidateRoots.Add((Join-Path $ProjectRoot "media_security\\vendor\\tools"))
+    $candidateRoots.Add((Join-Path $ProjectRoot "vendor\\tools"))
+
+    foreach ($root in $candidateRoots | Select-Object -Unique) {
+        if ([string]::IsNullOrWhiteSpace($root)) {
+            continue
+        }
+
+        foreach ($relativePath in $toolRelativePaths[$Name]) {
+            foreach ($candidate in @(
+                (Join-Path $root ("windows\\" + $relativePath)),
+                (Join-Path $root $relativePath)
+            )) {
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                    return @{
+                        Found = $true
+                        Path = (Resolve-Path -LiteralPath $candidate).Path
+                        Source = "bundled"
+                    }
+                }
+            }
+        }
+    }
+
+    $command = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($null -ne $command) {
+        return @{
+            Found = $true
+            Path = $command.Source
+            Source = "path"
+        }
+    }
+
+    return @{
+        Found = $false
+        Path = $null
+        Source = $null
+    }
 }
 
 function Refresh-Path {
@@ -136,7 +227,8 @@ function Install-Tool {
 $missing = New-Object System.Collections.Generic.List[string]
 
 foreach ($tool in @("ffprobe", "exiftool")) {
-    if (-not (Test-Tool -Name $tool)) {
+    $toolInfo = Resolve-ToolPath -Name $tool
+    if (-not $toolInfo.Found) {
         Write-Host "[MISSING] $tool" -ForegroundColor Yellow
         if ($InstallMissing) {
             Write-Host "Auto-install is enabled, trying to install $tool..." -ForegroundColor Cyan
@@ -154,13 +246,12 @@ foreach ($tool in @("ffprobe", "exiftool")) {
         continue
     }
 
-    $command = Get-Command $tool -ErrorAction SilentlyContinue
-    Write-Host "[OK] $tool -> $($command.Source)" -ForegroundColor Green
+    Write-Host "[OK] $tool -> $($toolInfo.Path) [$($toolInfo.Source)]" -ForegroundColor Green
     try {
         if ($tool -eq "ffprobe") {
-            $versionLine = (& ffprobe -version 2>$null | Select-Object -First 1)
+            $versionLine = (& $toolInfo.Path -version 2>$null | Select-Object -First 1)
         } else {
-            $versionLine = "exiftool " + (& exiftool -ver 2>$null | Select-Object -First 1)
+            $versionLine = "exiftool " + (& $toolInfo.Path -ver 2>$null | Select-Object -First 1)
         }
         if ($versionLine) {
             Write-Host "      $versionLine"

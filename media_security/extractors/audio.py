@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import wave
 from pathlib import Path
 from typing import Any
 
 from media_security.core.constants import MAX_MP3_SCAN_BYTES
+from media_security.external_tools import resolve_external_tool
 
 BITRATE_TABLE = {
     ("1", "I"): [
@@ -190,6 +190,10 @@ AUDIO_EXIFTOOL_TAG_KEYS = {
     "GPSPosition",
     "GPSLatitude",
     "GPSLongitude",
+    "XMPToolkit",
+    "CreatorTool",
+    "HistorySoftwareAgent",
+    "MetadataDate",
 }
 
 AUDIO_STREAM_TAG_KEYS = {"creation_time", "language", "handler_name", "encoder", "title", "artist", "album"}
@@ -448,11 +452,12 @@ def _decode_id3_text_content(content: bytes) -> str:
 
 
 def _extract_ffprobe_summary(path: Path) -> dict[str, Any] | None:
-    if shutil.which("ffprobe") is None:
+    ffprobe_path = resolve_external_tool("ffprobe")
+    if ffprobe_path is None:
         return {"available": False}
 
     command = [
-        "ffprobe",
+        str(ffprobe_path),
         "-v",
         "quiet",
         "-print_format",
@@ -501,10 +506,11 @@ def _extract_ffprobe_summary(path: Path) -> dict[str, Any] | None:
 
 
 def _extract_exiftool_summary(path: Path) -> dict[str, Any] | None:
-    if shutil.which("exiftool") is None:
+    exiftool_path = resolve_external_tool("exiftool")
+    if exiftool_path is None:
         return {"available": False}
 
-    command = ["exiftool", "-j", str(path)]
+    command = [str(exiftool_path), "-j", str(path)]
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True)
         payload = json.loads(result.stdout)

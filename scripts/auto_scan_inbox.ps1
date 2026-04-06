@@ -1,7 +1,7 @@
 param(
     [string]$Inbox = "datasets",
     [string]$ReportsDir = "reports/auto",
-    [string]$PostgresDsn = "postgresql://postgres:postgres@localhost:5432/media_security",
+    [string]$SqlitePath,
     [switch]$NoToolSetup,
     [switch]$NoAutoInstallTools,
     [switch]$RequireExternalTools
@@ -31,4 +31,9 @@ New-Item -ItemType Directory -Force -Path $ReportsDir | Out-Null
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $jsonOut = Join-Path $ReportsDir "scan_$timestamp.json"
 
-python -m media_security.cli $Inbox --recursive --json-out $jsonOut --postgres-dsn $PostgresDsn --no-tool-setup
+$arguments = @("-m", "media_security.cli", $Inbox, "--recursive", "--json-out", $jsonOut, "--no-tool-setup")
+if ($SqlitePath) {
+    $arguments += @("--sqlite-path", $SqlitePath)
+}
+
+python $arguments

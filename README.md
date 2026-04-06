@@ -72,7 +72,7 @@
 - безопасная обработка входных файлов;
 - проверка сигнатур, структуры контейнера и метаданных;
 - оценка риска и формирование технического отчета;
-- хранение истории проверок в PostgreSQL;
+- хранение истории проверок в SQLite;
 - контроль того, чтобы в репозиторий не попадали секреты.
 
 Зона ответственности участника по направлению ИИ:
@@ -90,9 +90,13 @@
 - поддержка форматов `wav`, `mp3`, `mp4`, `avi`, `mov`;
 - проверка расширения, сигнатуры, MIME-типа и базовой структуры контейнера;
 - извлечение и анализ метаданных;
+- модуль криминалистического анализа метаданных с кросс-проверкой `embedded`/`ffprobe`/`exiftool`, проверкой XMP-маркеров, конфликтов по времени, устройству и координатам;
+- контроль отсутствия аппаратных меток и выявление следов редактирования или транскодирования по метаданным;
+- хеширование входных файлов по `SHA-256`;
+- механизм верификации весов моделей по `SHA-256` через манифест доверенных хешей `security/model_hash_manifest.json`;
 - компактный JSON-отчет без дублирования одинаковых полей;
 - полуавтоматический и автоматический запуск через PowerShell-скрипты;
-- хранение истории проверок в PostgreSQL;
+- хранение истории проверок в локальной SQLite;
 - проверка репозитория на типовые утечки секретов перед `git push`.
 
 ## Структура данных
@@ -125,6 +129,18 @@ python -m media_security.cli path/to/file.mp4 --json-out reports/file_report.jso
 python -m media_security.cli path/to/dataset --recursive --json-out reports/full_report.json --no-history
 ```
 
+Регистрация доверенного хеша весов модели:
+
+```bash
+python -m media_security.model_integrity register security/model_hash_manifest.json path/to/model.onnx
+```
+
+Проверка весов моделей на подмену:
+
+```bash
+python -m media_security.model_integrity verify security/model_hash_manifest.json
+```
+
 PowerShell-скрипты:
 
 ```powershell
@@ -135,6 +151,8 @@ PowerShell-скрипты:
 ## Внешние инструменты
 
 Для расширенного извлечения метаданных используются `ffprobe` и `exiftool`.
+
+Проект уже подготовлен к будущей упаковке этих утилит внутрь приложения: код ищет их не только в системном `PATH`, но и в локальной папке `media_security/vendor/tools`, а также по явным путям из переменных окружения.
 
 Проверка доступности инструментов:
 
@@ -148,14 +166,59 @@ PowerShell-скрипты:
 - `--no-auto-install-tools`
 - `--require-external-tools`
 
-## PostgreSQL
+Заготовка под будущий `exe` для Windows:
 
-История проверок может сохраняться в PostgreSQL. Параметры подключения должны задаваться локально через переменные окружения или через параметры запуска.
+```text
+media_security/
+  vendor/
+    tools/
+      windows/
+        ffmpeg/
+          bin/
+            ffprobe.exe
+        exiftool/
+          exiftool.exe
+```
 
-Пример запуска базы:
+Если бинарники лежат не в проекте, можно задать:
+
+```env
+MEDIA_SECURITY_TOOLS_DIR=H:\Detection\AI-detection-in-music-and-video\media_security\vendor\tools
+MEDIA_SECURITY_FFPROBE_PATH=
+MEDIA_SECURITY_EXIFTOOL_PATH=
+```
+
+Подробная памятка лежит в `media_security/vendor/tools/README.md`.
+
+## SQLite
+
+История проверок сохраняется в локальную SQLite, что лучше подходит для итогового `exe`-приложения.
+
+Безопасная схема в проекте теперь такая:
+
+- база хранится локально в профиле текущего пользователя, а не в сетевом сервисе;
+- по умолчанию приложение использует отдельный путь вида `AppData/Local/MediaSecurity/history/scan_history.sqlite3`;
+- для SQLite включаются защитные `PRAGMA`: `trusted_schema=OFF`, `secure_delete=ON`, `foreign_keys=ON`;
+- локальные файлы БД не должны попадать в Git.
+
+Необязательная настройка через `.env`:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Если `.env` не создан, приложение всё равно будет работать и само выберет безопасный путь для локальной SQLite.
+
+Если нужен свой путь к базе, можно задать:
+
+```env
+MEDIA_SECURITY_SQLITE_PATH=C:\Users\<user>\AppData\Local\MediaSecurity\history\scan_history.sqlite3
+```
+
+Или передать путь явно:
 
 ```bash
-docker compose -f infra/docker-compose.postgres.yml up -d
+python -m media_security.cli path/to/file.mp4 --sqlite-path path/to/history.sqlite3
 ```
 
 ## Безопасность репозитория

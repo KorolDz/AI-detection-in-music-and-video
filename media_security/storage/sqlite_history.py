@@ -1,30 +1,19 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from media_security.core.analysis import refresh_report_assessment
 from media_security.core.models import Finding, ScanReport, Severity
-
-try:
-    import psycopg
-    from psycopg.rows import dict_row
-except ImportError:  # pragma: no cover - handled at runtime.
-    psycopg = None
-    dict_row = None
+from media_security.storage.sqlite_config import harden_sqlite_file_permissions, resolve_sqlite_path
 
 
-class PostgresScanHistoryStore:
-    def __init__(self, dsn: str) -> None:
-        if not dsn:
-            raise ValueError("PostgreSQL DSN is required for history storage.")
-        if psycopg is None:
-            raise RuntimeError(
-                "Package 'psycopg' is not installed. Install dependencies with: "
-                "python -m pip install -e .[dev]"
-            )
-        self.dsn = dsn
+class SQLiteScanHistoryStore:
+    def __init__(self, sqlite_path: str | Path | None = None) -> None:
+        self.sqlite_path = resolve_sqlite_path(sqlite_path)
         self._init_schema()
 
     def enrich_and_store(self, report: ScanReport) -> None:
@@ -74,45 +63,41 @@ class PostgresScanHistoryStore:
     def _init_schema(self) -> None:
         query = """
             CREATE TABLE IF NOT EXISTS scan_history (
-                id BIGSERIAL PRIMARY KEY,
-                scanned_at_utc TIMESTAMPTZ NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scanned_at_utc TEXT NOT NULL,
                 file_path TEXT NOT NULL,
                 file_name TEXT NOT NULL,
                 extension TEXT NOT NULL,
                 sha256 TEXT NOT NULL,
                 md5 TEXT NOT NULL,
-                size_bytes BIGINT NOT NULL,
+                size_bytes INTEGER NOT NULL,
                 mime_type TEXT,
                 detected_format TEXT,
                 verdict TEXT NOT NULL,
                 trust_score INTEGER NOT NULL,
                 risk_level TEXT NOT NULL,
-                findings_json JSONB NOT NULL,
-                metadata_json JSONB NOT NULL
+                findings_json TEXT NOT NULL,
+                metadata_json TEXT NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_scan_history_file_path ON scan_history(file_path);
             CREATE INDEX IF NOT EXISTS idx_scan_history_sha256 ON scan_history(sha256);
         """
         with self._connect() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(query)
-            connection.commit()
+            connection.executescript(query)
 
     def _fetch_last_scan_for_path(self, file_path: str) -> dict[str, Any] | None:
-        with self._connect(row_factory=dict_row) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT id, scanned_at_utc, sha256
-                    FROM scan_history
-                    WHERE file_path = %s
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """,
-                    (file_path,),
-                )
-                row = cursor.fetchone()
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, scanned_at_utc, sha256
+                FROM scan_history
+                WHERE file_path = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (file_path,),
+            ).fetchone()
         return dict(row) if row else None
 
     def _fetch_other_paths_with_hash(
@@ -121,19 +106,17 @@ class PostgresScanHistoryStore:
         if not sha256_hash:
             return []
         with self._connect() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT DISTINCT file_path
-                    FROM scan_history
-                    WHERE sha256 = %s AND file_path <> %s
-                    ORDER BY file_path
-                    LIMIT %s
-                    """,
-                    (sha256_hash, exclude_path, limit),
-                )
-                rows = cursor.fetchall()
-        return [row[0] for row in rows]
+            rows = connection.execute(
+                """
+                SELECT DISTINCT file_path
+                FROM scan_history
+                WHERE sha256 = ? AND file_path <> ?
+                ORDER BY file_path
+                LIMIT ?
+                """,
+                (sha256_hash, exclude_path, limit),
+            ).fetchall()
+        return [str(row["file_path"]) for row in rows]
 
     def _insert_scan(self, report: ScanReport) -> int:
         if report.metadata is None:
@@ -141,7 +124,7 @@ class PostgresScanHistoryStore:
 
         metadata = report.metadata
         payload = (
-            datetime.now(tz=UTC),
+            datetime.now(tz=UTC).isoformat(),
             metadata.path,
             metadata.name,
             metadata.extension,
@@ -158,38 +141,50 @@ class PostgresScanHistoryStore:
         )
 
         with self._connect() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    INSERT INTO scan_history (
-                        scanned_at_utc,
-                        file_path,
-                        file_name,
-                        extension,
-                        sha256,
-                        md5,
-                        size_bytes,
-                        mime_type,
-                        detected_format,
-                        verdict,
-                        trust_score,
-                        risk_level,
-                        findings_json,
-                        metadata_json
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)
-                    RETURNING id
-                    """,
-                    payload,
+            cursor = connection.execute(
+                """
+                INSERT INTO scan_history (
+                    scanned_at_utc,
+                    file_path,
+                    file_name,
+                    extension,
+                    sha256,
+                    md5,
+                    size_bytes,
+                    mime_type,
+                    detected_format,
+                    verdict,
+                    trust_score,
+                    risk_level,
+                    findings_json,
+                    metadata_json
                 )
-                row = cursor.fetchone()
-            connection.commit()
-        if row is None:
-            raise RuntimeError("Failed to insert record into scan_history.")
-        return int(row[0])
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                payload,
+            )
+            return int(cursor.lastrowid)
 
-    def _connect(self, row_factory: Any | None = None) -> Any:
-        connect_kwargs: dict[str, Any] = {}
-        if row_factory is not None:
-            connect_kwargs["row_factory"] = row_factory
-        return psycopg.connect(self.dsn, **connect_kwargs)
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.sqlite_path, timeout=5.0)
+        connection.row_factory = sqlite3.Row
+        self._apply_security_pragmas(connection)
+        harden_sqlite_file_permissions(self.sqlite_path)
+        return connection
+
+    @staticmethod
+    def _apply_security_pragmas(connection: sqlite3.Connection) -> None:
+        pragmas = (
+            "PRAGMA foreign_keys = ON",
+            "PRAGMA journal_mode = WAL",
+            "PRAGMA synchronous = FULL",
+            "PRAGMA secure_delete = ON",
+            "PRAGMA temp_store = MEMORY",
+            "PRAGMA busy_timeout = 5000",
+            "PRAGMA trusted_schema = OFF",
+        )
+        for pragma in pragmas:
+            try:
+                connection.execute(pragma)
+            except sqlite3.DatabaseError:
+                continue
