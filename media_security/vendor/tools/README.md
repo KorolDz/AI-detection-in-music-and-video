@@ -1,10 +1,10 @@
 # Внешние инструменты для будущего `exe`
 
-Эта папка подготовлена под локально вложенные `ffprobe` и `exiftool`, чтобы итоговое приложение не требовало отдельной ручной установки этих утилит у пользователя.
+Эта папка подготовлена под локально вложенные `ffmpeg`, `ffprobe` и `exiftool`, чтобы итоговое приложение не требовало отдельной ручной установки этих утилит у пользователя.
 
 Текущий код уже умеет искать инструменты в таком порядке:
 
-1. Явный путь из `MEDIA_SECURITY_FFPROBE_PATH` или `MEDIA_SECURITY_EXIFTOOL_PATH`.
+1. Явный путь из `MEDIA_SECURITY_FFMPEG_PATH`, `MEDIA_SECURITY_FFPROBE_PATH` или `MEDIA_SECURITY_EXIFTOOL_PATH`.
 2. Общая папка из `MEDIA_SECURITY_TOOLS_DIR`.
 3. Локально вложенные файлы в `media_security/vendor/tools/...`.
 4. Системный `PATH`.
@@ -18,6 +18,7 @@ media_security/
       windows/
         ffmpeg/
           bin/
+            ffmpeg.exe
             ffprobe.exe
         exiftool/
           exiftool.exe

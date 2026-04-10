@@ -23,7 +23,7 @@ if (-not $NoToolSetup) {
 
     & $checkToolsScript @toolArgs
     if ($RequireExternalTools -and $LASTEXITCODE -ne 0) {
-        throw "External tools check failed. Install ffprobe/exiftool or run without -RequireExternalTools."
+        throw "External tools check failed. Install ffmpeg/ffprobe/exiftool or run without -RequireExternalTools."
     }
 }
 

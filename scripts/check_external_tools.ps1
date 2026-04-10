@@ -7,6 +7,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 $toolHints = @{
+    "ffmpeg" = @(
+        "winget install Gyan.FFmpeg",
+        "choco install ffmpeg -y",
+        "Manual install: https://ffmpeg.org/download.html"
+    )
     "ffprobe" = @(
         "winget install Gyan.FFmpeg",
         "choco install ffmpeg -y",
@@ -31,15 +36,21 @@ function Test-Tool {
 function Resolve-ToolPath {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet("ffprobe", "exiftool")]
+        [ValidateSet("ffmpeg", "ffprobe", "exiftool")]
         [string]$Name
     )
 
     $toolEnvVars = @{
+        "ffmpeg" = "MEDIA_SECURITY_FFMPEG_PATH"
         "ffprobe" = "MEDIA_SECURITY_FFPROBE_PATH"
         "exiftool" = "MEDIA_SECURITY_EXIFTOOL_PATH"
     }
     $toolRelativePaths = @{
+        "ffmpeg" = @(
+            "ffmpeg\\bin\\ffmpeg.exe",
+            "ffmpeg\\ffmpeg.exe",
+            "ffmpeg.exe"
+        )
         "ffprobe" = @(
             "ffmpeg\\bin\\ffprobe.exe",
             "ffprobe\\ffprobe.exe",
@@ -130,14 +141,14 @@ function Refresh-Path {
 function Install-Tool {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet("ffprobe", "exiftool")]
+        [ValidateSet("ffmpeg", "ffprobe", "exiftool")]
         [string]$Tool
     )
 
     $installAttempts = @()
 
     if (Test-Tool -Name "winget") {
-        if ($Tool -eq "ffprobe") {
+        if ($Tool -in @("ffmpeg", "ffprobe")) {
             $installAttempts += @(
                 @{
                     Name = "winget"
@@ -172,7 +183,7 @@ function Install-Tool {
     }
 
     if (Test-Tool -Name "choco") {
-        if ($Tool -eq "ffprobe") {
+        if ($Tool -in @("ffmpeg", "ffprobe")) {
             $installAttempts += @(
                 @{
                     Name = "choco"
@@ -226,7 +237,7 @@ function Install-Tool {
 
 $missing = New-Object System.Collections.Generic.List[string]
 
-foreach ($tool in @("ffprobe", "exiftool")) {
+foreach ($tool in @("ffmpeg", "ffprobe", "exiftool")) {
     $toolInfo = Resolve-ToolPath -Name $tool
     if (-not $toolInfo.Found) {
         Write-Host "[MISSING] $tool" -ForegroundColor Yellow
@@ -248,7 +259,9 @@ foreach ($tool in @("ffprobe", "exiftool")) {
 
     Write-Host "[OK] $tool -> $($toolInfo.Path) [$($toolInfo.Source)]" -ForegroundColor Green
     try {
-        if ($tool -eq "ffprobe") {
+        if ($tool -eq "ffmpeg") {
+            $versionLine = (& $toolInfo.Path -version 2>$null | Select-Object -First 1)
+        } elseif ($tool -eq "ffprobe") {
             $versionLine = (& $toolInfo.Path -version 2>$null | Select-Object -First 1)
         } else {
             $versionLine = "exiftool " + (& $toolInfo.Path -ver 2>$null | Select-Object -First 1)

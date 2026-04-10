@@ -10,6 +10,7 @@ from pathlib import Path
 
 from media_security.core.models import ScanReport, Severity
 from media_security.external_tools import missing_external_tools
+from media_security.reporting import render_markdown_report, write_markdown_report
 from media_security.service import SecurityAnalysisService
 from media_security.storage.sqlite_config import resolve_sqlite_path
 
@@ -32,6 +33,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write full report to JSON file.",
     )
     parser.add_argument(
+        "--report-out",
+        type=Path,
+        help="Write full human-readable Markdown report to file.",
+    )
+    parser.add_argument(
         "--fail-on-warning",
         action="store_true",
         help="Return non-zero exit code when warning findings exist.",
@@ -52,7 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-tool-setup",
         action="store_true",
-        help="Skip ffprobe/exiftool pre-scan setup.",
+        help="Skip ffmpeg/ffprobe/exiftool pre-scan setup.",
     )
     parser.add_argument(
         "--no-auto-install-tools",
@@ -62,7 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--require-external-tools",
         action="store_true",
-        help="Fail startup when ffprobe/exiftool are unavailable.",
+        help="Fail startup when ffmpeg/ffprobe/exiftool are unavailable.",
     )
     return parser
 
@@ -96,9 +102,13 @@ def main(argv: list[str] | None = None) -> int:
         print("No files found for scanning.")
         return 1
 
-    _print_reports(reports)
+    print(render_markdown_report(args.path, reports))
     if not args.no_history:
         print(f"History DB: SQLite ({sqlite_path})")
+
+    if args.report_out:
+        write_markdown_report(args.report_out, args.path, reports)
+        print(f"Markdown report written to: {args.report_out}")
 
     if args.json_out:
         _write_json_report(args.json_out, args.path, reports)
@@ -114,23 +124,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.fail_on_warning and has_warning:
         return 1
     return 0
-
-
-def _print_reports(reports: list[ScanReport]) -> None:
-    for report in reports:
-        score = f"score={report.trust_score:3d}"
-        risk = f"risk={report.risk_level}"
-        scan_ref = f"scan_id={report.scan_id}" if report.scan_id is not None else "scan_id=-"
-        print(f"{report.verdict.upper():7} {score} {risk:14} {scan_ref:12} {report.file}")
-        for finding in report.findings:
-            print(f"  - {finding.severity.value.upper():7} {finding.code}: {finding.message}")
-
-    total = len(reports)
-    passed = sum(1 for report in reports if report.verdict == "pass")
-    warnings = sum(1 for report in reports if report.verdict == "warning")
-    failed = sum(1 for report in reports if report.verdict == "fail")
-    print("")
-    print(f"Summary: total={total}, pass={passed}, warning={warnings}, fail={failed}")
 
 
 def _write_json_report(output_path: Path, target: str, reports: list[ScanReport]) -> None:
@@ -457,7 +450,7 @@ def _setup_external_tools(skip_setup: bool, no_auto_install: bool, require_exter
     if skip_setup:
         return
 
-    tools = ("ffprobe", "exiftool")
+    tools = ("ffmpeg", "ffprobe", "exiftool")
     missing = missing_external_tools(tools)
     if not missing:
         return
@@ -481,7 +474,7 @@ def _setup_external_tools(skip_setup: bool, no_auto_install: bool, require_exter
         missing = missing_external_tools(tools)
         if require_external and missing:
             raise RuntimeError(
-                "External tools check failed. Install ffprobe/exiftool or run without --require-external-tools."
+                "External tools check failed. Install ffmpeg/ffprobe/exiftool or run without --require-external-tools."
             )
         return
 

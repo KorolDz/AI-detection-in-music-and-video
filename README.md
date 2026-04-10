@@ -120,14 +120,16 @@ python -m pip install -e .[dev]
 Проверка одного файла:
 
 ```bash
-python -m media_security.cli path/to/file.mp4 --json-out reports/file_report.json --no-history
+python -m media_security.cli path/to/file.mp4 --report-out reports/file_report.md --json-out reports/file_report.json --no-history
 ```
 
 Проверка всей папки:
 
 ```bash
-python -m media_security.cli path/to/dataset --recursive --json-out reports/full_report.json --no-history
+python -m media_security.cli path/to/dataset --recursive --report-out reports/full_report.md --json-out reports/full_report.json --no-history
 ```
+
+Markdown-отчёт предназначен для чтения человеком, а JSON-отчёт сохраняется для автоматизации и интеграций.
 
 Регистрация доверенного хеша весов модели:
 
@@ -150,7 +152,7 @@ PowerShell-скрипты:
 
 ## Внешние инструменты
 
-Для расширенного извлечения метаданных используются `ffprobe` и `exiftool`.
+Для расширенного извлечения метаданных и поиска склеек используются `ffmpeg`, `ffprobe` и `exiftool`.
 
 Проект уже подготовлен к будущей упаковке этих утилит внутрь приложения: код ищет их не только в системном `PATH`, но и в локальной папке `media_security/vendor/tools`, а также по явным путям из переменных окружения.
 
@@ -165,6 +167,7 @@ PowerShell-скрипты:
 - `--no-tool-setup`
 - `--no-auto-install-tools`
 - `--require-external-tools`
+- `--report-out`
 
 Заготовка под будущий `exe` для Windows:
 
@@ -175,6 +178,7 @@ media_security/
       windows/
         ffmpeg/
           bin/
+            ffmpeg.exe
             ffprobe.exe
         exiftool/
           exiftool.exe
@@ -184,6 +188,7 @@ media_security/
 
 ```env
 MEDIA_SECURITY_TOOLS_DIR=H:\Detection\AI-detection-in-music-and-video\media_security\vendor\tools
+MEDIA_SECURITY_FFMPEG_PATH=
 MEDIA_SECURITY_FFPROBE_PATH=
 MEDIA_SECURITY_EXIFTOOL_PATH=
 ```

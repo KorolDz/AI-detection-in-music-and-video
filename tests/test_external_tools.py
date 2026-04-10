@@ -17,6 +17,20 @@ def test_resolve_external_tool_prefers_explicit_env_path(monkeypatch, tmp_path: 
     assert get_external_tool_info("ffprobe").source == "env"
 
 
+def test_resolve_ffmpeg_tool_prefers_explicit_env_path(monkeypatch, tmp_path: Path) -> None:
+    tool_path = tmp_path / "ffmpeg.exe"
+    tool_path.write_bytes(b"test")
+
+    monkeypatch.setenv("MEDIA_SECURITY_FFMPEG_PATH", str(tool_path))
+    monkeypatch.delenv("MEDIA_SECURITY_TOOLS_DIR", raising=False)
+    monkeypatch.setattr("media_security.external_tools.shutil.which", lambda _name: None)
+
+    resolved = resolve_external_tool("ffmpeg")
+
+    assert resolved == tool_path.resolve()
+    assert get_external_tool_info("ffmpeg").source == "env"
+
+
 def test_resolve_external_tool_from_shared_tools_dir(monkeypatch, tmp_path: Path) -> None:
     bundled_path = tmp_path / "windows" / "ffmpeg" / "bin" / "ffprobe.exe"
     bundled_path.parent.mkdir(parents=True, exist_ok=True)

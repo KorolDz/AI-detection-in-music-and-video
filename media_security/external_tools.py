@@ -19,11 +19,17 @@ class ExternalToolInfo:
 
 
 _TOOL_ENV_VARS = {
+    "ffmpeg": "MEDIA_SECURITY_FFMPEG_PATH",
     "ffprobe": "MEDIA_SECURITY_FFPROBE_PATH",
     "exiftool": "MEDIA_SECURITY_EXIFTOOL_PATH",
 }
 
 _TOOL_FILENAMES = {
+    "ffmpeg": {
+        "windows": ("ffmpeg/bin/ffmpeg.exe", "ffmpeg/ffmpeg.exe", "ffmpeg.exe"),
+        "linux": ("ffmpeg/bin/ffmpeg", "ffmpeg/ffmpeg", "ffmpeg"),
+        "darwin": ("ffmpeg/bin/ffmpeg", "ffmpeg/ffmpeg", "ffmpeg"),
+    },
     "ffprobe": {
         "windows": ("ffmpeg/bin/ffprobe.exe", "ffprobe/ffprobe.exe", "ffprobe.exe"),
         "linux": ("ffmpeg/bin/ffprobe", "ffprobe/ffprobe", "ffprobe"),
