@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import subprocess
 import wave
+from importlib.util import find_spec
 from pathlib import Path
 
 import pytest
@@ -11,10 +12,15 @@ from media_security.core.scanner import MediaSecurityScanner
 from media_security.core.splice_forensics import (
     _correlate_video_and_audio_track,
     _merge_candidates,
+    _suppress_dense_music_candidates,
     _should_flag_modality,
     analyze_splice_forensics,
 )
 from media_security.external_tools import resolve_external_tool
+
+HAS_FFMPEG = resolve_external_tool("ffmpeg") is not None
+HAS_AUDIO_SPLICE_DEPS = all(find_spec(name) is not None for name in ("numpy", "pydub"))
+HAS_VIDEO_SPLICE_DEPS = all(find_spec(name) is not None for name in ("numpy", "scenedetect"))
 
 
 def test_merge_candidates_combines_close_events() -> None:
@@ -58,6 +64,22 @@ def test_warning_threshold_requires_high_or_multiple_candidates() -> None:
     assert not _should_flag_modality({"candidates": [{"confidence": 0.66}]})
 
 
+def test_dense_music_candidates_are_suppressed() -> None:
+    candidates = [
+        {
+            "timestamp_sec": float(index * 2),
+            "confidence": 0.9,
+            "window_sec": 0.04,
+            "signals": {"spectral_flux": 1.0, "mfcc_distance": 0.9},
+            "source": "audio",
+        }
+        for index in range(12)
+    ]
+
+    assert _suppress_dense_music_candidates(candidates, duration_sec=180.0) == []
+    assert _suppress_dense_music_candidates(candidates[:4], duration_sec=180.0) == candidates[:4]
+
+
 def test_correlation_boosts_video_candidate_and_records_match() -> None:
     video = {
         "status": "suspicious",
@@ -94,7 +116,7 @@ def test_correlation_boosts_video_candidate_and_records_match() -> None:
     assert correlation["status"] == "aligned"
     assert correlation["match_count"] == 1
     assert video["candidates"][0]["aligned_audio_track"] is True
-    assert video["candidates"][0]["confidence"] == 0.82
+    assert video["candidates"][0]["confidence"] == 0.87
 
 
 def test_splice_analysis_reports_unavailable_without_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -112,6 +134,8 @@ def test_splice_analysis_reports_unavailable_without_ffmpeg(tmp_path: Path, monk
 
 @pytest.mark.skipif(resolve_external_tool("ffmpeg") is None, reason="ffmpeg is required for splice integration tests")
 def test_scanner_detects_audio_splice_in_wav(tmp_path: Path) -> None:
+    if not HAS_AUDIO_SPLICE_DEPS:
+        pytest.skip("audio splice dependencies are required")
     audio_path = tmp_path / "spliced.wav"
     _create_tone_wav(audio_path, segments=[(440.0, 0.8), (0.0, 0.06), (880.0, 0.8)])
 
@@ -125,6 +149,8 @@ def test_scanner_detects_audio_splice_in_wav(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(resolve_external_tool("ffmpeg") is None, reason="ffmpeg is required for splice integration tests")
 def test_scanner_detects_audio_splice_in_mp3(tmp_path: Path) -> None:
+    if not HAS_AUDIO_SPLICE_DEPS:
+        pytest.skip("audio splice dependencies are required")
     wav_path = tmp_path / "spliced_source.wav"
     mp3_path = tmp_path / "spliced.mp3"
     _create_tone_wav(wav_path, segments=[(440.0, 0.8), (0.0, 0.06), (880.0, 0.8)])
@@ -139,6 +165,8 @@ def test_scanner_detects_audio_splice_in_mp3(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(resolve_external_tool("ffmpeg") is None, reason="ffmpeg is required for splice integration tests")
 def test_scanner_detects_video_seam_and_audio_alignment(tmp_path: Path) -> None:
+    if not HAS_AUDIO_SPLICE_DEPS or not HAS_VIDEO_SPLICE_DEPS:
+        pytest.skip("video/audio splice dependencies are required")
     video_path = tmp_path / "video_seam.mp4"
     _run_ffmpeg(
         [
@@ -191,6 +219,8 @@ def test_scanner_detects_video_seam_and_audio_alignment(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(resolve_external_tool("ffmpeg") is None, reason="ffmpeg is required for splice integration tests")
 def test_scanner_detects_splice_only_in_video_audio_track(tmp_path: Path) -> None:
+    if not HAS_AUDIO_SPLICE_DEPS:
+        pytest.skip("audio splice dependencies are required")
     video_path = tmp_path / "audio_only_seam.mp4"
     _run_ffmpeg(
         [
@@ -236,6 +266,8 @@ def test_scanner_detects_splice_only_in_video_audio_track(tmp_path: Path) -> Non
 
 @pytest.mark.skipif(resolve_external_tool("ffmpeg") is None, reason="ffmpeg is required for splice integration tests")
 def test_video_audio_track_reports_unavailable_when_stream_is_missing(tmp_path: Path) -> None:
+    if not HAS_AUDIO_SPLICE_DEPS:
+        pytest.skip("audio splice dependencies are required")
     video_path = tmp_path / "silent_video.mp4"
     _run_ffmpeg(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=yellow:s=320x240:d=1.2:r=24", str(video_path)])
 
@@ -244,6 +276,29 @@ def test_video_audio_track_reports_unavailable_when_stream_is_missing(tmp_path: 
 
     assert splice["video_audio_track"]["status"] == "unavailable"
     assert splice["video_audio_track"]["reason"] == "no_audio_stream"
+
+
+def test_video_analysis_reports_unavailable_when_pyscenedetect_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    video_path = tmp_path / "sample.mp4"
+    video_path.write_bytes(b"not-a-real-video")
+    technical = {"ffprobe": {"width": 320, "height": 240, "audio_stream_count": 0}}
+
+    monkeypatch.setattr("media_security.core.splice_forensics.SceneManager", None)
+    monkeypatch.setattr("media_security.core.splice_forensics.ContentDetector", None)
+    monkeypatch.setattr("media_security.core.splice_forensics.open_video", None)
+    monkeypatch.setattr(
+        "media_security.core.splice_forensics.get_external_tool_info",
+        lambda _name: type("_Tool", (), {"available": True, "path": Path("ffmpeg.exe"), "source": "test"})(),
+    )
+
+    findings = analyze_splice_forensics(video_path, "mp4", "video", technical)
+
+    assert technical["splice_analysis"]["video"]["status"] == "unavailable"
+    assert technical["splice_analysis"]["video"]["reason"] == "missing_video_dependencies"
+    assert any(finding.code == "SPLICE_ANALYSIS_UNAVAILABLE" for finding in findings)
 
 
 def _create_tone_wav(path: Path, segments: list[tuple[float, float]]) -> None:

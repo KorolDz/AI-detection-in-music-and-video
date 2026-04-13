@@ -9,7 +9,12 @@ description = "Cybersecurity-focused metadata and integrity checks for media fil
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "AI Detection Team" }]
-dependencies = []
+dependencies = [
+    "numpy>=1.26",
+    "librosa>=0.10",
+    "pydub>=0.25",
+    "scenedetect>=0.6",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]

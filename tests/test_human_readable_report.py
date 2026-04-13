@@ -24,6 +24,8 @@ def test_render_markdown_report_for_single_file_includes_key_sections() -> None:
     assert "43 deg 46' 9.84" in markdown
     assert "Аудиодорожка видео" in markdown
     assert "VIDEO_AUDIO_TRACK_SPLICE_SUSPECTED" in markdown
+    assert "резкий спектральный переход" in markdown
+    assert "речь или обычная запись" in markdown
     assert "format_tags" not in markdown
     assert "stream_tags" not in markdown
     assert "\"available\"" not in markdown
@@ -222,22 +224,33 @@ def _build_sample_report(
                     "status": "clean",
                     "candidate_count": 0,
                     "peak_confidence": 0.0,
+                    "content_profile": "speech_or_general",
                     "candidates": [],
                 },
                 "video": {
                     "status": "suspicious",
                     "candidate_count": 1,
                     "peak_confidence": 0.85,
+                    "scene_transition_count": 3,
                     "candidates": [
-                        {"timestamp_sec": 0.75, "confidence": 0.85},
+                        {
+                            "timestamp_sec": 0.75,
+                            "confidence": 0.85,
+                            "reasons": ["резкая смена сцены", "freeze рядом с переходом"],
+                        },
                     ],
                 },
                 "video_audio_track": {
                     "status": "suspicious",
                     "candidate_count": 1,
                     "peak_confidence": 0.79,
+                    "content_profile": "speech_or_general",
                     "candidates": [
-                        {"timestamp_sec": 0.70, "confidence": 0.79},
+                        {
+                            "timestamp_sec": 0.70,
+                            "confidence": 0.79,
+                            "reasons": ["резкий спектральный переход", "граница паузы"],
+                        },
                     ],
                 },
                 "correlation": {

@@ -56,10 +56,15 @@ DETAIL_KEY_LABELS = {
     "match_count": "Совпадений",
     "error": "Ошибка",
     "sources": "Источники",
+    "modalities": "Модули",
+    "missing_dependencies": "Недостающие зависимости",
     "value": "Значение",
     "values": "Значения",
     "candidate_count": "Кандидатов",
     "peak_confidence": "Пиковая уверенность",
+    "top_candidates": "Ключевые кандидаты",
+    "content_profile": "Профиль анализа",
+    "scene_transition_count": "Проверено переходов",
 }
 
 MAX_DETAIL_PARTS = 3
@@ -332,10 +337,19 @@ def _render_splice_modality(modality_key: str, modality: object) -> list[str]:
     if status == "unavailable":
         if reason:
             lines.append(f"- Причина: {_translate_splice_reason(reason)}")
+        missing_dependencies = modality.get("missing_dependencies")
+        if isinstance(missing_dependencies, list) and missing_dependencies:
+            lines.append(f"- Не хватает зависимостей: {', '.join(str(item) for item in missing_dependencies)}")
         return lines
 
     lines.append(f"- Кандидатов: {modality.get('candidate_count', 0)}")
     lines.append(f"- Пиковая уверенность: {_format_confidence(modality.get('peak_confidence'))}")
+    content_profile = modality.get("content_profile")
+    if content_profile:
+        lines.append(f"- Профиль: {_format_content_profile(content_profile)}")
+    scene_transition_count = modality.get("scene_transition_count")
+    if isinstance(scene_transition_count, int):
+        lines.append(f"- Проверено переходов: {scene_transition_count}")
 
     candidates = modality.get("candidates")
     if not isinstance(candidates, list) or not candidates:
@@ -396,7 +410,16 @@ def _summarize_details(details: dict[str, Any]) -> str:
 
     parts: list[str] = []
     for key, value in details.items():
-        rendered = _format_detail_value(value)
+        if key == "reason":
+            rendered = _translate_splice_reason(value)
+        elif key == "modalities" and isinstance(value, list):
+            rendered = ", ".join(MODALITY_LABELS.get(str(item), str(item)) for item in value)
+        elif key == "top_candidates" and isinstance(value, list):
+            rendered = _format_candidate_list(value)
+        elif key == "matches" and isinstance(value, list):
+            rendered = _format_match_list(value)
+        else:
+            rendered = _format_detail_value(value)
         if not rendered:
             continue
         label = DETAIL_KEY_LABELS.get(key, _humanize_key(key))
@@ -429,6 +452,18 @@ def _format_detail_value(value: object) -> str:
                 break
         return "; ".join(parts)
     return str(value)
+
+
+def _format_match_list(matches: list[object]) -> str:
+    rendered: list[str] = []
+    for match in matches[:MAX_CANDIDATES_PER_MODALITY]:
+        if not isinstance(match, dict):
+            continue
+        video_time = _format_timestamp(match.get("video_timestamp_sec"))
+        audio_time = _format_timestamp(match.get("audio_timestamp_sec"))
+        delta = _format_timestamp(match.get("delta_sec"))
+        rendered.append(f"{video_time} / {audio_time} (delta {delta})")
+    return ", ".join(rendered) if rendered else ""
 
 
 def _sort_reports(reports: list[ScanReport]) -> list[ScanReport]:
@@ -566,7 +601,9 @@ def _format_candidate_list(candidates: list[object]) -> str:
             continue
         timestamp = _format_timestamp(candidate.get("timestamp_sec"))
         confidence = _format_confidence(candidate.get("confidence"))
-        rendered.append(f"{timestamp} ({confidence})")
+        reasons = _format_candidate_reasons(candidate.get("reasons"), candidate.get("signals"))
+        suffix = f"; {reasons}" if reasons else ""
+        rendered.append(f"{timestamp} ({confidence}{suffix})")
     return ", ".join(rendered) if rendered else "Недоступно"
 
 
@@ -588,8 +625,52 @@ def _translate_splice_reason(value: object) -> str:
         "no_audio_stream": "у видео нет аудиодорожки",
         "decode_failed": "не удалось декодировать поток",
         "dimensions_unavailable": "не удалось определить размер кадра",
+        "missing_audio_dependencies": "не хватает numpy или pydub",
+        "missing_video_dependencies": "не хватает numpy или PySceneDetect",
+        "scene_detection_failed": "не удалось выделить кандидаты смен сцен",
     }
     return mapping.get(reason, reason)
+
+
+def _format_content_profile(value: object) -> str:
+    mapping = {
+        "speech_or_general": "речь или обычная запись",
+        "music_like": "музыкальный/плотный микс",
+    }
+    text = str(value)
+    return mapping.get(text, text)
+
+
+def _format_candidate_reasons(reasons: object, signals: object) -> str:
+    if isinstance(reasons, list) and reasons:
+        return ", ".join(str(item) for item in reasons[:3])
+    if not isinstance(signals, dict):
+        return ""
+    ordered = sorted(
+        ((str(name), float(value)) for name, value in signals.items() if isinstance(value, (int, float))),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    labels = [_humanize_signal_name(name) for name, value in ordered[:3] if value > 0]
+    return ", ".join(labels)
+
+
+def _humanize_signal_name(value: str) -> str:
+    mapping = {
+        "rms_jump": "скачок громкости",
+        "spectral_flux": "резкий спектральный переход",
+        "onset_jump": "скачок onset",
+        "mfcc_distance": "смена тембра",
+        "spectral_centroid_shift": "сдвиг спектрального центра",
+        "spectral_bandwidth_shift": "сдвиг ширины спектра",
+        "silence_boundary": "граница паузы",
+        "scene_score": "резкая смена сцены",
+        "freeze_near_boundary": "freeze рядом с переходом",
+        "black_or_dark_transition": "тёмный кадр на границе",
+        "short_shot_gap": "короткий фрагмент",
+        "audio_track_alignment": "совпадение с аудиодорожкой",
+    }
+    return mapping.get(value, _humanize_key(value))
 
 
 def _humanize_key(value: str) -> str:
