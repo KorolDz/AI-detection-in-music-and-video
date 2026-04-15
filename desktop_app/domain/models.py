@@ -74,8 +74,12 @@ class AnalysisResult:
     export_payload: str = ""
     analysis_id: int | None = None
     file_sha256: str | None = None
+    uploaded_at: datetime | None = None
+    analysis_started_at: datetime | None = None
     analyzed_at: datetime | None = None
     stored_at: datetime | None = None
+    integrity_signature: str | None = None
+    integrity_verified: bool | None = None
     report_path: str | None = None
 
     @property
@@ -89,6 +93,58 @@ class AnalysisResult:
         if self.is_fake:
             return "Подозрение на подделку"
         return "Оригинал"
+
+    @property
+    def probability_percent(self) -> int | None:
+        if self.probability is None:
+            return None
+        return max(0, min(100, int(round(self.probability * 100))))
+
+    @property
+    def integrity_status(self) -> str:
+        if self.integrity_verified is None:
+            return "Н/Д"
+        if self.integrity_verified:
+            return "Проверено"
+        return "Нарушена"
+
+
+@dataclass(slots=True)
+class AnalysisHistoryEntry:
+    analysis_id: int
+    file_name: str
+    media_type: str
+    stored_at: datetime | None
+    status: str
+    probability: float | None = None
+    file_sha256: str | None = None
+    integrity_verified: bool | None = None
+
+    @property
+    def display_status(self) -> str:
+        if self.status == "error":
+            return "Ошибка"
+        if self.status == "fake":
+            return "Подозрение на подделку"
+        return "Оригинал"
+
+    @property
+    def integrity_status(self) -> str:
+        if self.integrity_verified is None:
+            return "Н/Д"
+        if self.integrity_verified:
+            return "Проверено"
+        return "Нарушена"
+
+
+@dataclass(slots=True)
+class AuditLogEntry:
+    event_time: datetime
+    event_type: str
+    severity: str
+    message: str
+    result_id: int | None = None
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

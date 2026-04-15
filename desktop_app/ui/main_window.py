@@ -6,6 +6,7 @@ try:
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QFont
     from PySide6.QtWidgets import QFileDialog
+    from PySide6.QtWidgets import QDialog
     from PySide6.QtWidgets import QFrame
     from PySide6.QtWidgets import QGridLayout
     from PySide6.QtWidgets import QHBoxLayout
@@ -22,19 +23,27 @@ try:
     from PySide6.QtWidgets import QTextEdit
     from PySide6.QtWidgets import QVBoxLayout
     from PySide6.QtWidgets import QWidget
-except ImportError as exc:  # pragma: no cover - depends on local env
+except ImportError as exc:  # pragma: no cover
     raise ImportError("Для запуска desktop-интерфейса необходимо установить PySide6.") from exc
 
 from desktop_app.app import create_app_context
+from desktop_app.application.audit_log_service import AuditLogService
+from desktop_app.application.audit_logger import AuditLogger
 from desktop_app.application.coordinator import AnalysisCoordinator
+from desktop_app.application.history_service import AnalysisHistoryService
+from desktop_app.application.report_formatter import ReportFormatter
 from desktop_app.config import AppConfig
 from desktop_app.domain import AnalysisResult
-from desktop_app.exporter import export_result_to_txt
+from desktop_app.exporter import export_result
 
+from .audit_log_dialog import AuditLogDialog
+from .history_dialog import HistoryDialog
+from .report_preview_dialog import ReportPreviewDialog
 from .theme import MAIN_WINDOW_STYLESHEET
 from .worker import AnalysisThread
 
 VIDEO_FILE_FILTER = "Video Files (*.mp4 *.avi *.mov)"
+EXPORT_FILE_FILTER = "PDF Files (*.pdf);;HTML Files (*.html);;Text Files (*.txt)"
 
 
 class MainWindow(QMainWindow):
@@ -42,24 +51,29 @@ class MainWindow(QMainWindow):
         self,
         coordinator: AnalysisCoordinator | None = None,
         config: AppConfig | None = None,
+        history_service: AnalysisHistoryService | None = None,
+        audit_log_service: AuditLogService | None = None,
+        audit_logger: AuditLogger | None = None,
     ) -> None:
         super().__init__()
-
+        context = None
         if coordinator is None or config is None:
             context = create_app_context(config)
-            self._coordinator = context.coordinator
-            self._config = context.config
-        else:
-            self._coordinator = coordinator
-            self._config = config
 
-        self._selected_file: str = ""
+        self._coordinator = coordinator or context.coordinator
+        self._config = config or context.config
+        self._history_service = history_service or (context.history_service if context else None)
+        self._audit_log_service = audit_log_service or (context.audit_log_service if context else None)
+        self._audit_logger = audit_logger or (context.audit_logger if context else None)
+        self._report_formatter = ReportFormatter()
+
+        self._selected_file = ""
         self._current_result: AnalysisResult | None = None
         self._analysis_thread: AnalysisThread | None = None
 
         self.setWindowTitle("AI Media Inspector")
-        self.resize(1280, 860)
-        self.setMinimumSize(1120, 760)
+        self.resize(1260, 840)
+        self.setMinimumSize(1080, 720)
         self.setFont(QFont("Segoe UI", 11))
         self.setStyleSheet(MAIN_WINDOW_STYLESHEET)
 
@@ -68,260 +82,243 @@ class MainWindow(QMainWindow):
         self._refresh_controls()
 
     def _build_ui(self) -> None:
-        central_widget = QWidget(self)
-        central_widget.setObjectName("windowSurface")
-        self.setCentralWidget(central_widget)
+        central = QWidget(self)
+        central.setObjectName("windowSurface")
+        self.setCentralWidget(central)
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(12, 12, 12, 12)
 
-        outer_layout = QVBoxLayout(central_widget)
-        outer_layout.setContentsMargins(12, 12, 12, 12)
-        outer_layout.setSpacing(0)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        scroll_area = QScrollArea(self)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-        scroll_content = QWidget(scroll_area)
-        scroll_content.setObjectName("windowSurface")
-        scroll_area.setWidget(scroll_content)
-
-        layout = QVBoxLayout(scroll_content)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(18)
+        content = QWidget(scroll)
+        content.setObjectName("windowSurface")
+        scroll.setWidget(content)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(14)
         layout.addWidget(self._build_hero_card())
 
-        content_layout = QHBoxLayout()
-        content_layout.setSpacing(18)
+        columns = QHBoxLayout()
+        columns.setSpacing(14)
 
-        left_column = QWidget(self)
-        left_layout = QVBoxLayout(left_column)
+        left = QWidget(self)
+        left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(18)
+        left_layout.setSpacing(14)
         left_layout.addWidget(self._build_file_card())
         left_layout.addWidget(self._build_control_card())
         left_layout.addWidget(self._build_status_card())
         left_layout.addStretch(1)
 
-        right_column = QWidget(self)
-        right_layout = QVBoxLayout(right_column)
+        right = QWidget(self)
+        right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(18)
+        right_layout.setSpacing(14)
         right_layout.addWidget(self._build_summary_card())
         right_layout.addWidget(self._build_details_card(), stretch=1)
 
-        content_layout.addWidget(left_column, 5)
-        content_layout.addWidget(right_column, 7)
-        layout.addLayout(content_layout, 1)
-        outer_layout.addWidget(scroll_area)
+        columns.addWidget(left, 5)
+        columns.addWidget(right, 7)
+        layout.addLayout(columns, 1)
+        outer.addWidget(scroll)
 
     def _build_hero_card(self) -> QFrame:
         card = QFrame(self)
         card.setObjectName("heroCard")
-
+        card.setMinimumHeight(170)
         layout = QHBoxLayout(card)
-        layout.setContentsMargins(28, 28, 28, 28)
-        layout.setSpacing(20)
+        layout.setContentsMargins(24, 22, 24, 22)
 
-        left_column = QVBoxLayout()
-        left_column.setSpacing(10)
-
+        left = QVBoxLayout()
         eyebrow = QLabel("Локальная проверка мультимедиа", card)
         eyebrow.setObjectName("heroEyebrow")
-
-        title = QLabel("Видеоанализ на предмет манипуляций", card)
+        title = QLabel("Визуализация результата анализа видео", card)
         title.setObjectName("heroTitle")
         title.setWordWrap(True)
+        left.addWidget(eyebrow)
+        left.addWidget(title)
+        left.addStretch(1)
 
-        subtitle = QLabel(
-            "Приложение запускает анализ в отдельном потоке, сохраняет результаты и аудит в SQLite "
-            "и позволяет сразу сформировать текстовый отчет.",
-            card,
-        )
-        subtitle.setObjectName("heroSubtitle")
-        subtitle.setWordWrap(True)
-
-        left_column.addWidget(eyebrow)
-        left_column.addWidget(title)
-        left_column.addWidget(subtitle)
-        left_column.addStretch(1)
-
-        right_column = QVBoxLayout()
-        right_column.setSpacing(12)
-
+        right = QVBoxLayout()
         self.hero_state_badge = QLabel("Режим готовности", card)
         self.hero_state_badge.setObjectName("heroBadge")
         self.hero_state_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.hero_formats_badge = QLabel("Форматы: MP4 / AVI / MOV", card)
+        self.hero_formats_badge = QLabel("Экспорт: TXT / HTML / PDF", card)
         self.hero_formats_badge.setObjectName("heroBadge")
         self.hero_formats_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.hero_helper_label = QLabel(
-            "Выберите локальный видеофайл и запустите проверку. После завершения можно изучить детали и сохранить отчет.",
-            card,
-        )
+        self.hero_helper_label = QLabel("", card)
         self.hero_helper_label.setObjectName("heroMeta")
         self.hero_helper_label.setWordWrap(True)
+        self.hero_helper_label.hide()
+        right.addWidget(self.hero_state_badge)
+        right.addWidget(self.hero_formats_badge)
+        right.addWidget(self.hero_helper_label)
+        right.addStretch(1)
 
-        right_column.addWidget(self.hero_state_badge)
-        right_column.addWidget(self.hero_formats_badge)
-        right_column.addWidget(self.hero_helper_label)
-        right_column.addStretch(1)
-
-        layout.addLayout(left_column, 3)
-        layout.addLayout(right_column, 2)
+        layout.addLayout(left, 3)
+        layout.addLayout(right, 2)
         return card
 
     def _build_file_card(self) -> QFrame:
-        card, layout = self._create_card(
-            "Источник данных",
-            "Выберите локальный видеофайл. Сейчас интерфейс поддерживает форматы MP4, AVI и MOV.",
-        )
-
+        card, layout = self._create_card("Источник данных", "")
+        card.setMinimumHeight(0)
         self.file_path_edit = QLineEdit(card)
         self.file_path_edit.setObjectName("filePathEdit")
         self.file_path_edit.setReadOnly(True)
         self.file_path_edit.setPlaceholderText("Файл пока не выбран")
-        self.file_path_edit.setMinimumHeight(50)
-
+        self.file_path_edit.setMinimumHeight(46)
         self.browse_button = QPushButton("Выбрать файл", card)
         self.browse_button.setObjectName("secondaryButton")
-        self.browse_button.setMinimumHeight(50)
-        self.browse_button.setMinimumWidth(180)
+        self.browse_button.setMinimumHeight(46)
         self.browse_button.clicked.connect(self._browse_file)
-
-        controls_row = QHBoxLayout()
-        controls_row.setSpacing(12)
-        controls_row.addWidget(self.file_path_edit, 1)
-        controls_row.addWidget(self.browse_button)
-
-        self.file_meta_label = QLabel("После выбора файла здесь появится краткая информация о видео.", card)
+        row = QHBoxLayout()
+        row.addWidget(self.file_path_edit, 1)
+        row.addWidget(self.browse_button)
+        self.file_meta_label = QLabel("", card)
         self.file_meta_label.setObjectName("mutedInfo")
         self.file_meta_label.setWordWrap(True)
-
-        layout.addLayout(controls_row)
+        self.file_meta_label.hide()
+        layout.addLayout(row)
         layout.addWidget(self.file_meta_label)
         return card
 
     def _build_control_card(self) -> QFrame:
-        card, layout = self._create_card(
-            "Команды",
-            "Анализ выполняется в отдельном потоке, поэтому интерфейс остается отзывчивым во время проверки.",
-        )
-
-        buttons_row = QHBoxLayout()
-        buttons_row.setSpacing(12)
-
+        card, layout = self._create_card("Команды", "")
+        card.setMinimumHeight(0)
+        row1 = QHBoxLayout()
+        row2 = QHBoxLayout()
         self.start_button = QPushButton("Запустить анализ", card)
         self.start_button.setObjectName("primaryButton")
-        self.start_button.setMinimumHeight(50)
+        self.start_button.setMinimumHeight(46)
         self.start_button.clicked.connect(self._start_analysis)
-
+        self.preview_button = QPushButton("Предпросмотр отчета", card)
+        self.preview_button.setObjectName("secondaryButton")
+        self.preview_button.setMinimumHeight(46)
+        self.preview_button.clicked.connect(self._open_report_preview)
         self.export_button = QPushButton("Экспорт отчета", card)
         self.export_button.setObjectName("secondaryButton")
-        self.export_button.setMinimumHeight(50)
+        self.export_button.setMinimumHeight(46)
         self.export_button.clicked.connect(self._export_report)
-
-        buttons_row.addWidget(self.start_button)
-        buttons_row.addWidget(self.export_button)
+        self.history_button = QPushButton("История проверок", card)
+        self.history_button.setObjectName("secondaryButton")
+        self.history_button.setMinimumHeight(46)
+        self.history_button.clicked.connect(self._open_history)
+        self.audit_log_button = QPushButton("Журнал действий", card)
+        self.audit_log_button.setObjectName("secondaryButton")
+        self.audit_log_button.setMinimumHeight(46)
+        self.audit_log_button.clicked.connect(self._open_audit_log)
+        row1.addWidget(self.start_button)
+        row1.addWidget(self.preview_button)
+        row2.addWidget(self.export_button)
+        row2.addWidget(self.history_button)
+        row2.addWidget(self.audit_log_button)
 
         self.progress_bar = QProgressBar(card)
         self.progress_bar.setObjectName("busyProgress")
         self.progress_bar.setRange(0, 1)
-        self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.hide()
-
-        self.busy_label = QLabel("Ожидание запуска анализа.", card)
+        self.busy_label = QLabel("Готово", card)
         self.busy_label.setObjectName("mutedInfo")
         self.busy_label.setWordWrap(True)
-
-        self.report_hint_label = QLabel("После завершения анализа станет доступен экспорт текстового отчета.", card)
+        self.report_hint_label = QLabel("", card)
         self.report_hint_label.setObjectName("mutedInfo")
         self.report_hint_label.setWordWrap(True)
-
-        layout.addLayout(buttons_row)
+        self.report_hint_label.hide()
+        layout.addLayout(row1)
+        layout.addLayout(row2)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.busy_label)
         layout.addWidget(self.report_hint_label)
         return card
 
     def _build_status_card(self) -> QFrame:
-        card, layout = self._create_card(
-            "Вердикт",
-            "После завершения проверки здесь появятся итоговый статус, ключевые метрики и идентификатор записи в SQLite.",
-        )
-
+        card, layout = self._create_card("Вердикт", "")
+        card.setMinimumHeight(0)
         self.status_value = QLabel("Ожидание анализа", card)
         self.status_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_value.setMinimumHeight(72)
-
-        self.status_note_label = QLabel("Выберите видео и запустите анализ, чтобы получить вердикт.", card)
+        self.status_value.setMinimumHeight(64)
+        self.status_note_label = QLabel("", card)
         self.status_note_label.setObjectName("mutedInfo")
         self.status_note_label.setWordWrap(True)
+        self.status_note_label.hide()
 
-        metric_grid = QGridLayout()
-        metric_grid.setHorizontalSpacing(12)
-        metric_grid.setVerticalSpacing(12)
+        probability_panel = QFrame(card)
+        probability_panel.setObjectName("subCard")
+        p_layout = QVBoxLayout(probability_panel)
+        p_layout.setContentsMargins(18, 18, 18, 18)
+        self.probability_headline = QLabel("Оценка вероятности", probability_panel)
+        self.probability_headline.setObjectName("cardTitle")
+        meta = QHBoxLayout()
+        self.probability_percent_label = QLabel("-", probability_panel)
+        self.probability_percent_label.setObjectName("probabilityValue")
+        self.threshold_text_label = QLabel("Порог: -", probability_panel)
+        self.threshold_text_label.setObjectName("mutedInfo")
+        meta.addWidget(self.probability_percent_label)
+        meta.addStretch(1)
+        meta.addWidget(self.threshold_text_label)
+        self.probability_gauge = QProgressBar(probability_panel)
+        self.probability_gauge.setObjectName("probabilityGauge")
+        self.probability_gauge.setRange(0, 100)
+        self.probability_gauge.setTextVisible(False)
+        self.probability_caption_label = QLabel("", probability_panel)
+        self.probability_caption_label.setObjectName("mutedInfo")
+        self.probability_caption_label.setWordWrap(True)
+        self.probability_caption_label.hide()
+        p_layout.addWidget(self.probability_headline)
+        p_layout.addLayout(meta)
+        p_layout.addWidget(self.probability_gauge)
+        p_layout.addWidget(self.probability_caption_label)
 
-        probability_tile, self.probability_value = self._build_metric_tile("Вероятность подделки")
-        threshold_tile, self.threshold_value = self._build_metric_tile("Порог")
-        frames_tile, self.frames_value = self._build_metric_tile("Проанализировано кадров")
-        record_tile, self.record_value = self._build_metric_tile("SQLite запись")
-        model_tile, self.model_path_value = self._build_metric_tile("Путь к модели", compact=True)
-        self.model_path_value.setWordWrap(True)
-
-        metric_grid.addWidget(probability_tile, 0, 0)
-        metric_grid.addWidget(threshold_tile, 0, 1)
-        metric_grid.addWidget(frames_tile, 1, 0)
-        metric_grid.addWidget(record_tile, 1, 1)
-        metric_grid.addWidget(model_tile, 2, 0, 1, 2)
+        grid = QGridLayout()
+        self._build_metric_widgets(grid)
 
         layout.addWidget(self.status_value)
         layout.addWidget(self.status_note_label)
-        layout.addLayout(metric_grid)
+        layout.addWidget(probability_panel)
+        layout.addLayout(grid)
         return card
 
-    def _build_summary_card(self) -> QFrame:
-        card, layout = self._create_card(
-            "Краткая сводка",
-            "Этот блок помогает быстро понять результат без просмотра всех технических деталей.",
-        )
+    def _build_metric_widgets(self, grid: QGridLayout) -> None:
+        probability_tile, self.probability_value = self._build_metric_tile("Вероятность")
+        threshold_tile, self.threshold_value = self._build_metric_tile("Порог")
+        frames_tile, self.frames_value = self._build_metric_tile("Проанализировано кадров")
+        record_tile, self.record_value = self._build_metric_tile("SQLite запись")
+        integrity_tile, self.integrity_value = self._build_metric_tile("Целостность")
+        model_tile, self.model_path_value = self._build_metric_tile("Путь к модели", compact=True)
+        self.model_path_value.setWordWrap(True)
+        grid.addWidget(probability_tile, 0, 0)
+        grid.addWidget(threshold_tile, 0, 1)
+        grid.addWidget(frames_tile, 1, 0)
+        grid.addWidget(record_tile, 1, 1)
+        grid.addWidget(integrity_tile, 2, 0)
+        grid.addWidget(model_tile, 2, 1)
 
+    def _build_summary_card(self) -> QFrame:
+        card, layout = self._create_card("Краткая сводка", "")
+        card.setMinimumHeight(0)
         self.summary_text = QTextEdit(card)
         self.summary_text.setObjectName("summaryText")
         self.summary_text.setReadOnly(True)
-        self.summary_text.setMinimumHeight(240)
-        self.summary_text.setPlaceholderText("Сводка по анализу появится после завершения проверки.")
-
+        self.summary_text.setMinimumHeight(210)
         layout.addWidget(self.summary_text)
         return card
 
     def _build_details_card(self) -> QFrame:
-        card, layout = self._create_card(
-            "Детали расследования",
-            "Слева показываются признаки и интерпретация результата, справа — технические наблюдения и служебные данные.",
-        )
-
+        card, layout = self._create_card("Детали расследования", "")
+        card.setMinimumHeight(0)
         splitter = QSplitter(Qt.Orientation.Horizontal, card)
-
-        indicators_panel = self._build_list_panel(
-            "Признаки",
-            "Ключевые наблюдения по вероятности подделки и поведению модели.",
-        )
-        technical_panel = self._build_list_panel(
-            "Технические детали",
-            "Параметры запуска, путь к модели и сведения о сохранении результата.",
-        )
-
+        indicators_panel = self._build_list_panel("Подозрительные признаки", "")
+        technical_panel = self._build_list_panel("Технические детали", "")
         self.indicators_list = indicators_panel["list"]
         self.technical_list = technical_panel["list"]
-
         splitter.addWidget(indicators_panel["frame"])
         splitter.addWidget(technical_panel["frame"])
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
-
         layout.addWidget(splitter, 1)
         return card
 
@@ -334,29 +331,27 @@ class MainWindow(QMainWindow):
         self._selected_file = file_path
         self.file_path_edit.setText(file_path)
         self.file_path_edit.setCursorPosition(0)
-
         path = Path(file_path)
         extension = path.suffix.lstrip(".").upper() or "UNKNOWN"
-        self.file_meta_label.setText(
-            f"Выбран файл: {path.name} | Формат: {extension}"
-        )
+        self._set_optional_text(self.file_meta_label, f"Выбран локальный файл: {path.name} | Формат: {extension}")
         self.hero_state_badge.setText("Файл готов к проверке")
-        self.hero_helper_label.setText(
-            "Файл выбран. Можно запускать анализ и затем сохранить результат в текстовый отчет."
-        )
-
+        self._set_optional_text(self.hero_helper_label, "")
         self._current_result = None
         self._reset_result_view()
         self._refresh_controls()
+        self._log_event(
+            "file_selected",
+            "info",
+            "Пользователь выбрал локальный файл для проверки.",
+            details={"file_name": path.name, "extension": path.suffix.lower()},
+        )
 
     def _start_analysis(self) -> None:
         if not self._selected_file or self._analysis_thread is not None:
             return
-
         self._current_result = None
         self._reset_result_view()
-        self._set_busy_state(True, "Идет анализ видео. Окно остается доступным, повторный запуск временно заблокирован.")
-
+        self._set_busy_state(True, "Идет анализ видео. Повторный запуск временно заблокирован.")
         self._analysis_thread = AnalysisThread(self._coordinator, self._selected_file)
         self._analysis_thread.analysis_finished.connect(self._handle_analysis_result)
         self._analysis_thread.analysis_failed.connect(self._handle_analysis_failure)
@@ -367,21 +362,21 @@ class MainWindow(QMainWindow):
     def _handle_analysis_result(self, result: AnalysisResult) -> None:
         self._current_result = result
         self._render_result(result)
-        self._set_busy_state(False, "Анализ завершен. Можно изучить результат или экспортировать отчет.")
+        self._set_busy_state(False, "Анализ завершен. Можно открыть отчет или экспортировать результат.")
         self._refresh_controls()
 
     def _handle_analysis_failure(self, message: str) -> None:
-        fallback_result = AnalysisResult(
+        fallback = AnalysisResult(
             status="error",
             media_type="video",
             file_path="",
             file_name=Path(self._selected_file).name,
             summary="Анализ завершился с критической ошибкой интерфейсного слоя.",
-            technical_details=[f"Идентификатор файла: {Path(self._selected_file).name}"],
+            technical_details=[f"Имя файла: {Path(self._selected_file).name}"],
             error_message=message,
         )
-        self._current_result = fallback_result
-        self._render_result(fallback_result)
+        self._current_result = fallback
+        self._render_result(fallback)
         self._set_busy_state(False, "Анализ завершился с ошибкой.")
         self._refresh_controls()
 
@@ -391,108 +386,150 @@ class MainWindow(QMainWindow):
             self._analysis_thread = None
         self._refresh_controls()
 
+    def _open_report_preview(self) -> None:
+        if self._current_result is None:
+            QMessageBox.information(self, "Нет результата", "Сначала выполните анализ или загрузите запись из истории.")
+            return
+        ReportPreviewDialog(self._current_result, self).exec()
+
     def _export_report(self) -> None:
         if self._current_result is None:
             return
-
-        suggested_name = f"report_{Path(self._current_result.file_name).stem}.txt"
-        suggested_path = self._config.reports_dir / suggested_name
-        destination, _ = QFileDialog.getSaveFileName(
+        suggested = self._config.reports_dir / f"report_{Path(self._current_result.file_name).stem}"
+        destination, selected_filter = QFileDialog.getSaveFileName(
             self,
             "Сохранить отчет",
-            str(suggested_path),
-            "Text Files (*.txt)",
+            str(suggested),
+            EXPORT_FILE_FILTER,
         )
         if not destination:
             return
-
+        file_format, normalized_destination = self._resolve_export_target(destination, selected_filter)
         try:
-            saved_path = export_result_to_txt(self._current_result, destination)
+            saved_path = export_result(self._current_result, normalized_destination, file_format)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Ошибка экспорта", f"Не удалось сохранить отчет:\n{exc}")
             return
-
         self._current_result.report_path = str(saved_path)
-        self.report_hint_label.setText("Отчет успешно сохранен.")
-        self.hero_helper_label.setText("Проверка завершена, отчет сформирован и сохранен.")
+        self._set_optional_text(self.report_hint_label, f"Отчет сохранен: {file_format.upper()}")
+        self._set_optional_text(self.hero_helper_label, "")
+        self._log_event(
+            "report_exported",
+            "info",
+            "Отчет по анализу успешно экспортирован.",
+            result_id=self._current_result.analysis_id,
+            details={
+                "file_name": self._current_result.file_name,
+                "report_file": Path(saved_path).name,
+                "report_format": file_format,
+            },
+        )
         QMessageBox.information(self, "Экспорт завершен", f"Отчет сохранен:\n{saved_path}")
+
+    def _open_history(self) -> None:
+        if self._history_service is None:
+            QMessageBox.information(self, "История недоступна", "История проверок пока недоступна.")
+            return
+        dialog = HistoryDialog(self._history_service, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted or dialog.selected_analysis_id is None:
+            return
+        result = self._history_service.get_analysis(dialog.selected_analysis_id)
+        if result is None:
+            QMessageBox.warning(self, "Запись не найдена", "Не удалось загрузить выбранную запись из истории.")
+            return
+        self._current_result = result
+        self._render_result(result)
+        self._set_optional_text(self.file_meta_label, f"Загружена запись из истории: {result.file_name}")
+        self._set_optional_text(self.report_hint_label, "Запись из истории загружена")
+        self._set_optional_text(self.hero_helper_label, "")
+        self._refresh_controls()
+
+    def _open_audit_log(self) -> None:
+        if self._audit_log_service is None:
+            QMessageBox.information(self, "Журнал недоступен", "Журнал действий пока недоступен.")
+            return
+        AuditLogDialog(self._audit_log_service, self).exec()
 
     def _render_result(self, result: AnalysisResult) -> None:
         self.status_value.setText(result.display_status)
         self.status_value.setStyleSheet(self._status_style(result))
-        self.status_note_label.setText(self._status_note(result))
+        self._set_optional_text(self.status_note_label, self._status_note(result))
 
-        self.probability_value.setText(
-            f"{result.probability:.4f}" if result.probability is not None else "-"
-        )
-        self.threshold_value.setText(
-            f"{result.threshold:.4f}" if result.threshold is not None else "-"
-        )
+        probability_text = self._format_probability(result.probability)
+        threshold_text = self._format_probability(result.threshold)
+        probability_percent = result.probability_percent or 0
+        is_alert = bool(result.probability is not None and result.threshold is not None and result.probability > result.threshold)
+
+        self.probability_percent_label.setText(probability_text)
+        self.threshold_text_label.setText(f"Порог: {threshold_text}")
+        self.probability_gauge.setValue(probability_percent)
+        self.probability_gauge.setStyleSheet(self._probability_gauge_style(is_alert))
+        self._set_optional_text(self.probability_caption_label, self._probability_caption(result, is_alert))
+
+        self.probability_value.setText(probability_text)
+        self.threshold_value.setText(threshold_text)
         self.frames_value.setText(self._extract_frames(result.technical_details))
         self.record_value.setText(str(result.analysis_id) if result.analysis_id is not None else "-")
+        self.integrity_value.setText(result.integrity_status)
         self.model_path_value.setText(self._extract_model_path(result))
-        self.summary_text.setPlainText(result.summary)
 
-        self._fill_list(
-            self.indicators_list,
-            result.indicators,
-            "После анализа здесь появятся признаки и интерпретация результата.",
-        )
+        self.summary_text.setPlainText(self._build_summary_block(result))
+        self._fill_list(self.indicators_list, result.indicators, "Нет данных")
 
         technical_items = list(result.technical_details)
         if result.analysis_id is not None:
             technical_items.append(f"Идентификатор анализа: {result.analysis_id}")
+        if result.uploaded_at is not None:
+            technical_items.append(f"Время загрузки: {self._format_datetime(result.uploaded_at)}")
+        if result.analysis_started_at is not None:
+            technical_items.append(f"Время старта анализа: {self._format_datetime(result.analysis_started_at)}")
+        if result.analyzed_at is not None:
+            technical_items.append(f"Время завершения анализа: {self._format_datetime(result.analyzed_at)}")
         if result.stored_at is not None:
             technical_items.append(f"Дата сохранения: {self._format_datetime(result.stored_at)}")
+        if result.file_sha256:
+            technical_items.append(f"SHA-256 файла: {result.file_sha256}")
+        technical_items.append(f"Контроль целостности: {result.integrity_status}")
         if result.error_message:
             technical_items.append(f"Сообщение об ошибке: {result.error_message}")
+        self._fill_list(self.technical_list, technical_items, "Нет данных")
 
-        self._fill_list(
-            self.technical_list,
-            technical_items,
-            "Технические наблюдения появятся после завершения проверки.",
+        self.hero_state_badge.setText(
+            "Анализ завершен с ошибкой" if result.is_error else "Найдены подозрительные признаки" if result.is_fake else "Оригинальность подтверждена"
         )
-
-        if result.is_error:
-            self.hero_state_badge.setText("Анализ завершен с ошибкой")
-        elif result.is_fake:
-            self.hero_state_badge.setText("Найдены подозрительные признаки")
-        else:
-            self.hero_state_badge.setText("Оригинальность подтверждена")
-
-        self.hero_helper_label.setText(self._status_note(result))
-        self.report_hint_label.setText("Результат готов к экспорту в текстовый отчет.")
+        self._set_optional_text(self.hero_helper_label, "")
+        self._set_optional_text(self.report_hint_label, "Результат готов")
 
     def _reset_result_view(self) -> None:
         self.status_value.setText("Ожидание анализа")
         self.status_value.setStyleSheet(self._neutral_status_style())
-        self.status_note_label.setText("Итоговый статус появится после проверки выбранного файла.")
+        self._set_optional_text(self.status_note_label, "")
+        self.probability_percent_label.setText("-")
+        self.threshold_text_label.setText("Порог: -")
+        self.probability_gauge.setValue(0)
+        self.probability_gauge.setStyleSheet(self._probability_gauge_style(False))
+        self._set_optional_text(self.probability_caption_label, "")
         self.probability_value.setText("-")
         self.threshold_value.setText("-")
         self.frames_value.setText("-")
         self.record_value.setText("-")
+        self.integrity_value.setText("-")
         self.model_path_value.setText("-")
-        self.summary_text.setPlainText("Результат анализа появится после запуска проверки.")
-        self._fill_list(
-            self.indicators_list,
-            [],
-            "После анализа здесь появятся признаки и интерпретация результата.",
-        )
-        self._fill_list(
-            self.technical_list,
-            [],
-            "После анализа здесь появятся технические детали и служебные наблюдения.",
-        )
-        self.report_hint_label.setText("После завершения анализа станет доступен экспорт текстового отчета.")
+        self.summary_text.clear()
+        self._fill_list(self.indicators_list, [], "Нет данных")
+        self._fill_list(self.technical_list, [], "Нет данных")
+        self._set_optional_text(self.report_hint_label, "")
 
     def _refresh_controls(self) -> None:
         is_busy = self._analysis_thread is not None
         has_file = bool(self._selected_file)
         has_result = self._current_result is not None
-
         self.start_button.setEnabled(has_file and not is_busy)
         self.browse_button.setEnabled(not is_busy)
+        self.preview_button.setEnabled(has_result and not is_busy)
         self.export_button.setEnabled(has_result and not is_busy)
+        self.history_button.setEnabled(self._history_service is not None and not is_busy)
+        self.audit_log_button.setEnabled(self._audit_log_service is not None and not is_busy)
 
     def _set_busy_state(self, is_busy: bool, text: str) -> None:
         if is_busy:
@@ -507,11 +544,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         if self._analysis_thread is not None:
-            QMessageBox.information(
-                self,
-                "Анализ выполняется",
-                "Дождитесь завершения анализа перед закрытием окна.",
-            )
+            QMessageBox.information(self, "Анализ выполняется", "Дождитесь завершения анализа перед закрытием окна.")
             event.ignore()
             return
         super().closeEvent(event)
@@ -519,39 +552,31 @@ class MainWindow(QMainWindow):
     def _create_card(self, title: str, subtitle: str) -> tuple[QFrame, QVBoxLayout]:
         card = QFrame(self)
         card.setObjectName("card")
-        card.setMinimumHeight(220)
-
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(22, 22, 22, 22)
-        layout.setSpacing(16)
-
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
         title_label = QLabel(title, card)
         title_label.setObjectName("cardTitle")
-
-        subtitle_label = QLabel(subtitle, card)
-        subtitle_label.setObjectName("cardSubtitle")
-        subtitle_label.setWordWrap(True)
-
         layout.addWidget(title_label)
-        layout.addWidget(subtitle_label)
+        if subtitle:
+            subtitle_label = QLabel(subtitle, card)
+            subtitle_label.setObjectName("cardSubtitle")
+            subtitle_label.setWordWrap(True)
+            layout.addWidget(subtitle_label)
         return card, layout
 
     def _build_metric_tile(self, title: str, compact: bool = False) -> tuple[QFrame, QLabel]:
         tile = QFrame(self)
         tile.setObjectName("metricTile")
-        tile.setMinimumHeight(108)
-
+        tile.setMinimumHeight(92)
         layout = QVBoxLayout(tile)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(6)
-
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(4)
         title_label = QLabel(title, tile)
         title_label.setObjectName("metricCaption")
-
         value_label = QLabel("-", tile)
         value_label.setObjectName("metricValueCompact" if compact else "metricValue")
         value_label.setWordWrap(compact)
-
         layout.addWidget(title_label)
         layout.addWidget(value_label)
         return tile, value_label
@@ -559,63 +584,65 @@ class MainWindow(QMainWindow):
     def _build_list_panel(self, title: str, subtitle: str) -> dict[str, QWidget | QListWidget]:
         frame = QFrame(self)
         frame.setObjectName("subCard")
-        frame.setMinimumHeight(320)
-
+        frame.setMinimumHeight(250)
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
-
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
         title_label = QLabel(title, frame)
         title_label.setObjectName("cardTitle")
-
-        subtitle_label = QLabel(subtitle, frame)
-        subtitle_label.setObjectName("cardSubtitle")
-        subtitle_label.setWordWrap(True)
-
         detail_list = QListWidget(frame)
         detail_list.setObjectName("detailList")
-        detail_list.setAlternatingRowColors(False)
         detail_list.setWordWrap(True)
         detail_list.setTextElideMode(Qt.TextElideMode.ElideNone)
-        detail_list.setMinimumHeight(220)
-
+        detail_list.setMinimumHeight(180)
         layout.addWidget(title_label)
-        layout.addWidget(subtitle_label)
+        if subtitle:
+            subtitle_label = QLabel(subtitle, frame)
+            subtitle_label.setObjectName("cardSubtitle")
+            subtitle_label.setWordWrap(True)
+            layout.addWidget(subtitle_label)
         layout.addWidget(detail_list, 1)
         return {"frame": frame, "list": detail_list}
+
+    def _log_event(
+        self,
+        event_type: str,
+        severity: str,
+        message: str,
+        *,
+        result_id: int | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        if self._audit_logger is None:
+            return
+        self._audit_logger.log_event(event_type, severity, message, result_id=result_id, details=details)
 
     @staticmethod
     def _fill_list(widget: QListWidget, items: list[str], empty_message: str) -> None:
         widget.clear()
         if not items:
-            widget.addItem(QListWidgetItem(empty_message))
+            if empty_message:
+                widget.addItem(QListWidgetItem(empty_message))
             return
         for item in items:
             widget.addItem(QListWidgetItem(item))
+
+    @staticmethod
+    def _set_optional_text(label: QLabel, text: str) -> None:
+        label.setText(text)
+        label.setVisible(bool(text.strip()))
 
     @classmethod
     def _extract_frames(cls, technical_details: list[str]) -> str:
         return cls._match_after_colon(
             technical_details,
-            (
-                "Количество проанализированных кадров",
-                "Обработано кадров с лицами",
-                "Analyzed frames",
-            ),
+            ("Количество проанализированных кадров", "Обработано кадров с лицами", "Analyzed frames"),
         )
 
     @classmethod
     def _extract_model_path(cls, result: AnalysisResult) -> str:
         items = list(result.technical_details) + list(result.indicators)
-        return cls._match_after_colon(
-            items,
-            (
-                "Путь к модели",
-                "Использована модель",
-                "Model path",
-                "Model",
-            ),
-        )
+        return cls._match_after_colon(items, ("Путь к модели", "Использована модель", "Model path", "Model"))
 
     @staticmethod
     def _match_after_colon(items: list[str], markers: tuple[str, ...]) -> str:
@@ -636,42 +663,37 @@ class MainWindow(QMainWindow):
         return value.strftime("%Y-%m-%d %H:%M:%S")
 
     @staticmethod
+    def _format_probability(value: float | None) -> str:
+        if value is None:
+            return "-"
+        return f"{value * 100:.2f}%"
+
+    @staticmethod
     def _neutral_status_style() -> str:
         return (
-            "QLabel {"
-            "background-color: #dae6ea;"
-            "color: #173447;"
-            "border: 1px solid #c0d2d8;"
-            "padding: 12px 16px;"
-            "border-radius: 18px;"
-            "font-size: 16px;"
-            "font-weight: 700;"
-            "}"
+            "QLabel {background-color: #dae6ea; color: #173447; border: 1px solid #c0d2d8; "
+            "padding: 12px 16px; border-radius: 18px; font-size: 16px; font-weight: 700;}"
         )
 
     def _status_style(self, result: AnalysisResult) -> str:
         if result.status == "error":
-            background = "#fde8e4"
-            foreground = "#8e2a24"
-            border = "#edc2ba"
+            background, foreground, border = "#fde8e4", "#8e2a24", "#edc2ba"
         elif result.is_fake:
-            background = "#ffebd8"
-            foreground = "#8a4b16"
-            border = "#edcaa7"
+            background, foreground, border = "#ffebd8", "#8a4b16", "#edcaa7"
         else:
-            background = "#e1f1e7"
-            foreground = "#1c5b37"
-            border = "#bfdec9"
+            background, foreground, border = "#e1f1e7", "#1c5b37", "#bfdec9"
         return (
             "QLabel {"
-            f"background-color: {background};"
-            f"color: {foreground};"
-            f"border: 1px solid {border};"
-            "padding: 12px 16px;"
-            "border-radius: 18px;"
-            "font-size: 16px;"
-            "font-weight: 700;"
-            "}"
+            f"background-color: {background}; color: {foreground}; border: 1px solid {border}; "
+            "padding: 12px 16px; border-radius: 18px; font-size: 16px; font-weight: 700;}"
+        )
+
+    @staticmethod
+    def _probability_gauge_style(is_alert: bool) -> str:
+        chunk_color = "#cf5a43" if is_alert else "#2c6970"
+        return (
+            "QProgressBar {min-height: 18px; max-height: 18px; border: 0; border-radius: 9px; background-color: #e3ddd2;}"
+            f"QProgressBar::chunk {{background-color: {chunk_color}; border-radius: 9px;}}"
         )
 
     @staticmethod
@@ -679,5 +701,44 @@ class MainWindow(QMainWindow):
         if result.is_error:
             return result.error_message or "Проверка завершилась ошибкой. Изучите технические детали."
         if result.is_fake:
-            return "Вероятность подделки превышает допустимый порог. Рекомендуется дополнительная ручная проверка."
+            return "Вероятность подделки превышает порог. Рекомендуется дополнительная ручная проверка."
         return "Явных признаков манипуляции не обнаружено. Результат сохранен и готов к экспорту."
+
+    @staticmethod
+    def _probability_caption(result: AnalysisResult, is_alert: bool) -> str:
+        if result.probability is None:
+            return "Модель не вернула числовую вероятность для этого результата."
+        if result.threshold is None:
+            return "Вероятность рассчитана, но порог классификации недоступен."
+        if is_alert:
+            return "Вероятность превышает порог. Индикатор окрашен в красный цвет."
+        return "Вероятность не превышает порог. Индикатор остается нейтральным."
+
+    def _build_summary_block(self, result: AnalysisResult) -> str:
+        view_model = self._report_formatter.build_view_model(result)
+        return "\n".join(
+            [
+                f"Статус: {view_model.status_label}",
+                f"Вероятность: {view_model.probability_text}",
+                f"Порог: {view_model.threshold_text}",
+                "",
+                view_model.summary,
+            ]
+        )
+
+    @staticmethod
+    def _resolve_export_target(destination: str, selected_filter: str) -> tuple[str, str]:
+        destination_path = Path(destination)
+        suffix = destination_path.suffix.lower()
+        if suffix == ".pdf":
+            return "pdf", str(destination_path)
+        if suffix == ".html":
+            return "html", str(destination_path)
+        if suffix == ".txt":
+            return "txt", str(destination_path)
+        filter_lower = selected_filter.lower()
+        if "pdf" in filter_lower:
+            return "pdf", str(destination_path.with_suffix(".pdf"))
+        if "html" in filter_lower:
+            return "html", str(destination_path.with_suffix(".html"))
+        return "txt", str(destination_path.with_suffix(".txt"))

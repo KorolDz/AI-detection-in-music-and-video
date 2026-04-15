@@ -22,7 +22,7 @@ class FileLoader:
 
         absolute_path = Path(raw_path).expanduser().absolute()
         if not absolute_path.is_file():
-            raise FileNotFoundError(f"Файл не найден: {absolute_path}")
+            raise FileNotFoundError("Файл не найден или недоступен.")
 
         extension = absolute_path.suffix.lower()
         if extension in self._config.supported_video_extensions:

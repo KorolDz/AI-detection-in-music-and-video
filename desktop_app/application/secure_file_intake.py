@@ -127,7 +127,7 @@ class SecureFileIntakeService:
 
     def _ensure_regular_file(self, path: Path) -> str | None:
         if not path.exists():
-            return f"Файл не найден: {path}"
+            return "Файл не найден или недоступен."
         if path.is_symlink():
             return "Символические ссылки не поддерживаются для загрузки."
 

@@ -20,6 +20,8 @@ class DatabaseManager:
             conn.execute("PRAGMA foreign_keys = OFF;")
             self._create_tables(conn)
             self._migrate_analysis_results_file_path(conn)
+            self._ensure_analysis_results_columns(conn)
+            self._create_indexes(conn)
             conn.execute("PRAGMA foreign_keys = ON;")
 
     def _create_tables(self, conn: sqlite3.Connection) -> None:
@@ -30,6 +32,8 @@ class DatabaseManager:
                 file_name TEXT NOT NULL,
                 file_path TEXT,
                 media_type TEXT NOT NULL,
+                uploaded_at TEXT,
+                analysis_started_at TEXT,
                 analyzed_at TEXT,
                 stored_at TEXT,
                 status TEXT NOT NULL,
@@ -41,6 +45,8 @@ class DatabaseManager:
                 indicators_json TEXT NOT NULL,
                 technical_details_json TEXT NOT NULL,
                 file_sha256 TEXT,
+                integrity_signature TEXT,
+                integrity_version INTEGER,
                 report_path TEXT
             );
 
@@ -55,6 +61,17 @@ class DatabaseManager:
                 details_json TEXT NOT NULL,
                 FOREIGN KEY(result_id) REFERENCES analysis_results(id)
             );
+            """
+        )
+
+    def _create_indexes(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_analysis_results_stored_at
+            ON analysis_results (stored_at DESC, id DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_audit_log_event_time
+            ON audit_log (event_time DESC, id DESC);
             """
         )
 
@@ -74,6 +91,8 @@ class DatabaseManager:
                 file_name TEXT NOT NULL,
                 file_path TEXT,
                 media_type TEXT NOT NULL,
+                uploaded_at TEXT,
+                analysis_started_at TEXT,
                 analyzed_at TEXT,
                 stored_at TEXT,
                 status TEXT NOT NULL,
@@ -85,6 +104,8 @@ class DatabaseManager:
                 indicators_json TEXT NOT NULL,
                 technical_details_json TEXT NOT NULL,
                 file_sha256 TEXT,
+                integrity_signature TEXT,
+                integrity_version INTEGER,
                 report_path TEXT
             );
 
@@ -129,6 +150,22 @@ class DatabaseManager:
             ALTER TABLE analysis_results_new RENAME TO analysis_results;
             """
         )
+
+    def _ensure_analysis_results_columns(self, conn: sqlite3.Connection) -> None:
+        table_info = conn.execute("PRAGMA table_info(analysis_results)").fetchall()
+        existing_columns = {row["name"] for row in table_info}
+        required_columns = {
+            "uploaded_at": "TEXT",
+            "analysis_started_at": "TEXT",
+            "integrity_signature": "TEXT",
+            "integrity_version": "INTEGER",
+        }
+        for column_name, column_type in required_columns.items():
+            if column_name in existing_columns:
+                continue
+            conn.execute(
+                f"ALTER TABLE analysis_results ADD COLUMN {column_name} {column_type}"
+            )
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:

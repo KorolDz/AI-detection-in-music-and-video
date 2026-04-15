@@ -20,7 +20,7 @@ QFrame#heroCard {
         stop: 1 #2b675d
     );
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 26px;
+    border-radius: 22px;
 }
 
 QLabel#heroEyebrow {
@@ -47,8 +47,8 @@ QLabel#heroBadge {
     background-color: rgba(255, 248, 239, 0.12);
     color: #fff6ea;
     border: 1px solid rgba(255, 248, 239, 0.14);
-    border-radius: 16px;
-    padding: 10px 16px;
+    border-radius: 14px;
+    padding: 8px 14px;
     font-size: 13px;
     font-weight: 600;
 }
@@ -61,13 +61,13 @@ QLabel#heroMeta {
 QFrame#card {
     background-color: rgba(255, 252, 247, 0.96);
     border: 1px solid #d7d4cb;
-    border-radius: 22px;
+    border-radius: 20px;
 }
 
 QFrame#subCard {
     background-color: #f7f4ee;
     border: 1px solid #e3ddd1;
-    border-radius: 18px;
+    border-radius: 16px;
 }
 
 QLabel#cardTitle {
@@ -95,8 +95,8 @@ QLabel#mutedInfo {
 QLineEdit#filePathEdit {
     background-color: #fcfaf6;
     border: 1px solid #d5d7d1;
-    border-radius: 15px;
-    padding: 12px 14px;
+    border-radius: 14px;
+    padding: 10px 12px;
     min-height: 24px;
     font-size: 14px;
     color: #1d2e36;
@@ -104,7 +104,11 @@ QLineEdit#filePathEdit {
 }
 
 QTextEdit#summaryText,
-QListWidget#detailList {
+QTextEdit#auditDetails,
+QTextBrowser#reportPreviewBrowser,
+QListWidget#detailList,
+QTableWidget#historyTable,
+QTableWidget#auditTable {
     background-color: #fcfaf6;
     border: 1px solid #d8d7d0;
     border-radius: 16px;
@@ -115,8 +119,8 @@ QListWidget#detailList {
 
 QListWidget#detailList::item {
     border-radius: 10px;
-    padding: 10px 12px;
-    margin: 3px 0;
+    padding: 8px 10px;
+    margin: 2px 0;
 }
 
 QListWidget#detailList::item:selected {
@@ -124,9 +128,20 @@ QListWidget#detailList::item:selected {
     color: #123a48;
 }
 
+QTableWidget#historyTable::item,
+QTableWidget#auditTable::item {
+    padding: 8px 10px;
+}
+
+QTableWidget#historyTable::item:selected,
+QTableWidget#auditTable::item:selected {
+    background-color: #dae8ea;
+    color: #123a48;
+}
+
 QPushButton {
-    border-radius: 15px;
-    padding: 12px 18px;
+    border-radius: 14px;
+    padding: 10px 16px;
     min-height: 24px;
     font-size: 14px;
     font-weight: 600;
@@ -179,10 +194,29 @@ QProgressBar#busyProgress::chunk {
     background-color: #2c6970;
 }
 
+QProgressBar#probabilityGauge {
+    min-height: 18px;
+    max-height: 18px;
+    border: 0;
+    border-radius: 9px;
+    background-color: #e3ddd2;
+}
+
+QProgressBar#probabilityGauge::chunk {
+    border-radius: 9px;
+    background-color: #2c6970;
+}
+
 QFrame#metricTile {
     background-color: #f7f3ec;
     border: 1px solid #e1dccc;
-    border-radius: 18px;
+    border-radius: 16px;
+}
+
+QLabel#probabilityValue {
+    color: #173447;
+    font-size: 24px;
+    font-weight: 700;
 }
 
 QLabel#metricCaption {
