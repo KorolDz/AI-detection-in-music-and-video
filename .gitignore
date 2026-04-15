@@ -72,3 +72,4 @@ media_security/vendor/tools/**
 !media_security/vendor/tools/README.md
 !media_security/vendor/tools/**/
 !media_security/vendor/tools/**/.gitkeep
+weights/*
